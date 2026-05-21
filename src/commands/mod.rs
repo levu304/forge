@@ -3,6 +3,77 @@
 //! Defines the Command trait, CommandState machine, nom-based parser,
 //! and concrete command implementations (LINE, CIRCLE, ARC, PLINE).
 
+use crate::geometry::Point2D;
+use crate::util::Color;
+use hecs::World;
+
+/// Lightweight descriptor for preview geometry drawn during command
+/// execution (e.g., rubber-band line, temporary circle outline).
+pub struct PreviewEntity {
+    pub points: Vec<Point2D>,
+    pub color: Color,
+    pub width: f32,
+}
+
+/// A command is an interactive operation with multiple steps.
+/// Each step prompts the user for input (point, distance, angle, etc.).
+///
+/// NOTE: Send + Sync not required in v0.1.0 (single-threaded event loop).
+/// Add bounds if commands are dispatched across threads in v0.2.0+.
+pub trait Command {
+    /// Command name used in CLI (e.g., "LINE", "CIRCLE").
+    fn name(&self) -> &'static str;
+    /// Human-readable prompt for current step.
+    fn prompt(&self) -> String;
+    /// Number of steps remaining (0 = complete).
+    fn steps_remaining(&self) -> usize;
+    /// Process a user input event (point pick, text entry, etc.).
+    fn on_input(&mut self, input: CommandInput, world: &mut World) -> CommandResult;
+    /// Cancel the command, cleaning up any preview entities.
+    fn on_cancel(&mut self, world: &mut World);
+    /// Render preview geometry (e.g., rubber-band line).
+    fn preview(&self) -> Vec<PreviewEntity>;
+}
+
+pub enum CommandInput {
+    Point(Point2D),           // Mouse click or typed coordinate
+    Text(String),             // Command-line text entry
+    #[allow(dead_code)]
+    Distance(f64),            // Typed distance value (reserved: CIRCLE radius, etc.)
+    #[allow(dead_code)]
+    Angle(f64),               // Typed angle in degrees (reserved: ARC rotation)
+    Cancel,                   // Escape key
+    Confirm,                  // Enter key
+}
+
+pub enum CommandResult {
+    Continue,                 // Await next input
+    Complete,                 // Command finished successfully
+    Error(String),            // Invalid input, show error, continue
+    Cancelled,                // User cancelled
+}
+
+/// Manages the active command and command history.
+pub struct CommandState {
+    pub active: Option<Box<dyn Command>>,
+    pub history: Vec<String>, // Previous command strings
+    pub buffer: String,       // Current command-line text
+    pub last_error: Option<String>, // Most recent command error (displayed in UI)
+    pub pending_dispatch: Option<String>, // Text waiting to be dispatched from UI command line
+}
+
+impl Default for CommandState {
+    fn default() -> Self {
+        Self {
+            active: None,
+            history: Vec::new(),
+            buffer: String::new(),
+            last_error: None,
+            pending_dispatch: None,
+        }
+    }
+}
+
 pub mod parser;
 pub mod line_cmd;
 pub mod circle_cmd;
