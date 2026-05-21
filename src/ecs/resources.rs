@@ -123,10 +123,7 @@ impl CameraState {
         let bottom = (self.target.y - half_h) as f32;
         let top = (self.target.y + half_h) as f32;
 
-        // NOTE: `top` before `bottom` is intentional — it matches
-        // nalgebra's `Orthographic3` convention and produces the
-        // correct Y-flip for screen-space rendering.
-        let proj = nalgebra::Orthographic3::new(left, right, top, bottom, -1.0, 1.0);
+        let proj = nalgebra::Orthographic3::new(left, right, bottom, top, -1.0, 1.0);
         *proj.as_matrix()
     }
 }
