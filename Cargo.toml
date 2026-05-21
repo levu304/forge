@@ -1,0 +1,38 @@
+[package]
+name = "forge"
+version = "0.1.0"
+edition = "2021"
+authors = ["Forge Contributors"]
+license = "MIT OR Apache-2.0"
+rust-version = "1.87"
+
+[dependencies]
+# Core
+winit = "0.30"
+wgpu = "29"
+hecs = "0.10"
+nalgebra = "0.34"
+
+# Parsing
+nom = "8"
+
+# UI
+egui = "0.34"
+egui-wgpu = "0.34"
+egui-winit = "0.34"
+
+# Utils
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+pollster = "0.4"
+bytemuck = { version = "1.25", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1
