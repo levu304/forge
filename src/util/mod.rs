@@ -4,3 +4,6 @@
 
 pub mod color;
 pub mod error;
+
+pub use color::Color;
+pub use error::ForgeError;
