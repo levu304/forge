@@ -47,6 +47,9 @@ impl CameraState {
         if self.viewport_size.0 == 0 || self.viewport_size.1 == 0 {
             return Point2D::default();
         }
+        // Defensive clamp: prevent division by zero if zoom is uninitialised.
+        // Consistent with view_proj_matrix().
+        let z = self.zoom.max(0.0001);
         let half_w = self.viewport_size.0 as f64 / 2.0;
         let half_h = self.viewport_size.1 as f64 / 2.0;
 
@@ -57,8 +60,8 @@ impl CameraState {
 
         // Inverse of ortho projection * view translation
         Point2D::new(
-            self.target.x + ndc_x * half_w / self.zoom,
-            self.target.y + ndc_y * half_h / self.zoom,
+            self.target.x + ndc_x * half_w / z,
+            self.target.y + ndc_y * half_h / z,
         )
     }
 
