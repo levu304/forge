@@ -429,4 +429,123 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn test_parse_line_negative_coords() {
+        let result = parse_command("LINE -10,-20 30,-40");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Line(LineArgs {
+                start: Some(Point2D::new(-10.0, -20.0)),
+                end: Some(Point2D::new(30.0, -40.0)),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_circle_scientific_notation() {
+        let result = parse_command("CIRCLE 1e2,2e2 5e-1");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Circle(CircleArgs {
+                center: Some(Point2D::new(100.0, 200.0)),
+                radius: Some(0.5),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_arc_partial() {
+        // "ARC 0,0 50" supplies center and radius but no angles.
+        // The command system would then interactively prompt for angles.
+        let result = parse_command("ARC 0,0 50");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Arc(ArcArgs {
+                center: Some(Point2D::new(0.0, 0.0)),
+                radius: Some(50.0),
+                start_angle: None,
+                end_angle: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_circle_partial() {
+        // "CIRCLE 50,50" supplies a center but no radius.
+        // The parser consumes the point; remaining is empty.
+        let result = parse_command("CIRCLE 50,50");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Circle(CircleArgs {
+                center: Some(Point2D::new(50.0, 50.0)),
+                radius: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_line_trailing_whitespace() {
+        // Trailing whitespace after args is left in the remaining slice.
+        // The caller trims before dispatching, so this is acceptable.
+        let result = parse_command("LINE 0,0 100,100   ");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert_eq!(remaining, "   ");
+        assert_eq!(
+            cmd,
+            ParsedCommand::Line(LineArgs {
+                start: Some(Point2D::new(0.0, 0.0)),
+                end: Some(Point2D::new(100.0, 100.0)),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_pline_negative_coords() {
+        let result = parse_command("PLINE -10,-20 30,40 -50,60");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Polyline(PolylineArgs {
+                vertices: vec![
+                    Point2D::new(-10.0, -20.0),
+                    Point2D::new(30.0, 40.0),
+                    Point2D::new(-50.0, 60.0),
+                ],
+                closed: false,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_pline_close_without_vertices() {
+        // "PLINE C" triggers the close-token check before the point-collection
+        // loop runs, so the parser returns a closed polyline with empty vertices.
+        let result = parse_command("PLINE C");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Polyline(PolylineArgs {
+                vertices: vec![],
+                closed: true,
+            })
+        );
+    }
 }
