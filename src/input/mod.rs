@@ -47,6 +47,11 @@ pub struct InputMapper {
     /// Previous frame's mouse position in screen pixels, used for
     /// pan-delta calculation during middle-button drag.
     pub last_mouse_screen: (f32, f32),
+    /// Tracks whether the first `CursorMoved` after a middle-click should
+    /// be used as the pan baseline rather than producing a pan delta.
+    /// Prevents an incorrect huge pan when middle-clicking before any
+    /// mouse movement has occurred.
+    pub needs_pan_baseline: bool,
 }
 
 impl InputMapper {
@@ -107,6 +112,7 @@ impl InputMapper {
                     }
                     MouseButton::Middle => {
                         self.state.middle_down = true;
+                        self.needs_pan_baseline = true;
                         self.last_mouse_screen = self.state.mouse_screen;
                     }
                     MouseButton::Right => {
@@ -191,12 +197,21 @@ impl InputMapper {
         // recorded position. The delta is in screen pixels and is converted
         // to world units by the camera controller.
         if self.state.middle_down {
-            let dx = self.state.mouse_screen.0 - self.last_mouse_screen.0;
-            let dy = self.state.mouse_screen.1 - self.last_mouse_screen.1;
-            if dx != 0.0 || dy != 0.0 {
-                actions.push(InputAction::Pan(dx as f64, dy as f64));
+            if self.needs_pan_baseline {
+                // First CursorMoved after middle-click: use current position
+                // as baseline without producing a pan delta. This prevents a
+                // huge incorrect pan when the user middle-clicks before any
+                // CursorMoved event has been received.
+                self.last_mouse_screen = self.state.mouse_screen;
+                self.needs_pan_baseline = false;
+            } else {
+                let dx = self.state.mouse_screen.0 - self.last_mouse_screen.0;
+                let dy = self.state.mouse_screen.1 - self.last_mouse_screen.1;
+                if dx != 0.0 || dy != 0.0 {
+                    actions.push(InputAction::Pan(dx as f64, dy as f64));
+                }
+                self.last_mouse_screen = self.state.mouse_screen;
             }
-            self.last_mouse_screen = self.state.mouse_screen;
         }
 
         actions
