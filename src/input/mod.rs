@@ -108,7 +108,9 @@ impl InputMapper {
         match event {
             // ── Mouse movement ────────────────────────────────────────
             WindowEvent::CursorMoved { position, .. } => {
-                self.state.mouse_screen = (position.x as f32, position.y as f32);
+                let sx = position.x.clamp(0.0, 65536.0) as f32;
+                let sy = position.y.clamp(0.0, 65536.0) as f32;
+                self.state.mouse_screen = (sx, sy);
                 self.state.mouse_world = camera.screen_to_world(self.state.mouse_screen);
                 actions.push(InputAction::MouseMoved(self.state.mouse_world));
             }
