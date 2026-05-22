@@ -155,7 +155,10 @@ impl InputMapper {
                 // PixelDelta: precise pixel deltas; normalise to ~line scale.
                 let dy = match delta {
                     MouseScrollDelta::LineDelta(_, y) => *y as f64,
-                    MouseScrollDelta::PixelDelta(pos) => pos.y as f64 / 100.0,
+                    // PixelDelta follows screen convention: positive Y = scroll DOWN.
+                    // LineDelta uses logical convention: positive Y = scroll UP.
+                    // Negate PixelDelta so both produce consistent Zoom delta direction.
+                    MouseScrollDelta::PixelDelta(pos) => -pos.y as f64 / 100.0,
                 };
                 // Defensive clamp: limits zoom to ~2.6× per event (1.1^10 ≈ 2.59).
                 // Prevents extreme zoom from buggy drivers or synthetic events.
@@ -238,5 +241,76 @@ impl InputMapper {
         }
 
         actions
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use winit::{
+        dpi::PhysicalPosition,
+        event::{DeviceId, MouseScrollDelta, TouchPhase, WindowEvent},
+    };
+
+    /// Helper to construct a `MouseWheel` event for testing.
+    fn make_wheel_event(delta: MouseScrollDelta) -> WindowEvent {
+        WindowEvent::MouseWheel {
+            device_id: DeviceId::dummy(),
+            delta,
+            phase: TouchPhase::Moved,
+        }
+    }
+
+    /// `LineDelta` with positive Y produces a **positive** `Zoom` delta.
+    #[test]
+    fn line_delta_positive_y_zooms_in() {
+        let mut mapper = InputMapper::new();
+        let camera = CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 1.0,
+            viewport_size: (1000, 1000),
+            clear_color: crate::util::Color::BLACK,
+        };
+
+        let event = make_wheel_event(MouseScrollDelta::LineDelta(0.0, 1.0));
+        let actions = mapper.handle_event(&event, &camera);
+
+        let zoom_action = actions.iter().find_map(|a| {
+            if let InputAction::Zoom(dy, _) = a { Some(*dy) } else { None }
+        });
+        assert!(zoom_action.is_some(), "expected a Zoom action");
+        assert!(
+            zoom_action.unwrap() > 0.0,
+            "LineDelta positive Y should zoom in (positive delta), got {}",
+            zoom_action.unwrap()
+        );
+    }
+
+    /// `PixelDelta` with positive Y produces a **negative** `Zoom` delta
+    /// (screen Y+ is down, world Y+ is up).
+    #[test]
+    fn pixel_delta_positive_y_zooms_out() {
+        let mut mapper = InputMapper::new();
+        let camera = CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 1.0,
+            viewport_size: (1000, 1000),
+            clear_color: crate::util::Color::BLACK,
+        };
+
+        let event = make_wheel_event(MouseScrollDelta::PixelDelta(
+            PhysicalPosition::new(0.0, 100.0),
+        ));
+        let actions = mapper.handle_event(&event, &camera);
+
+        let zoom_action = actions.iter().find_map(|a| {
+            if let InputAction::Zoom(dy, _) = a { Some(*dy) } else { None }
+        });
+        assert!(zoom_action.is_some(), "expected a Zoom action");
+        assert!(
+            zoom_action.unwrap() < 0.0,
+            "PixelDelta positive Y should zoom out (negative delta), got {}",
+            zoom_action.unwrap()
+        );
     }
 }
