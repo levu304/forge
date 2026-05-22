@@ -3,6 +3,46 @@
 use crate::ecs::resources::CameraState;
 use super::InputAction;
 
+/// Applies a camera-level [`InputAction`] to a [`CameraState`].
+///
+/// Only [`InputAction::Pan`] and [`InputAction::Zoom`] are handled; all other
+/// variants (e.g. [`InputAction::Click`], [`InputAction::Confirm`]) are silently
+/// ignored, making this safe to call with any action without pre-filtering.
+///
+/// # Coordinate Conventions
+///
+/// The viewport uses a **screen-Y-down** coordinate system for input events
+/// (`CursorMoved`, `MouseInput`) and a **world-Y-up** system for the camera.
+/// Pan deltas therefore invert the Y component:
+///
+/// - `dx` is **negated**: screen-right → world-left (consistent with
+///   right-handed world space where the camera looks down -Z).
+/// - `dy` is **not negated** (screen-down is world-up), so a positive
+///   `dy` moves the camera target upward.
+///
+/// # Zoom Behaviour
+///
+/// Zoom applies an exponential factor of `1.1^{delta}` to the current zoom
+/// level. A positive `delta` zooms in, a negative `delta` zooms out. The
+/// zoom level is clamped to `[0.0001, 100_000.0]` to prevent degenerate
+/// states.
+///
+/// The camera target is adjusted toward the world-space `pivot` point so
+/// that the pixel under the cursor stays fixed — this gives the expected
+/// "zoom towards mouse pointer" feel.
+///
+/// # Pan Safety
+///
+/// Before dividing by `zoom` the value is floored to `0.0001` via
+/// [`f64::max`]. This guards against division by zero or very small zoom
+/// values that would produce extreme panning jumps.
+///
+/// # Side Effects
+///
+/// | Field | Mutated by |
+/// |-------|------------|
+/// | `camera.target` | `Pan` and `Zoom` |
+/// | `camera.zoom`   | `Zoom` only |
 pub fn apply_camera_action(camera: &mut CameraState, action: &InputAction) {
     match action {
         InputAction::Pan(dx, dy) => {
