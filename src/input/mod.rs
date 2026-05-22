@@ -55,6 +55,21 @@ pub struct InputMapper {
 }
 
 impl InputMapper {
+    /// Create a default-initialised [`InputMapper`].
+    ///
+    /// The initial mouse position is set to `(0.0, 0.0)`, the
+    /// [`InputState`] is zeroed (no buttons pressed, no modifiers
+    /// active), and the pan baseline is empty (meaning the first
+    /// pan delta will be ignored until a `CursorMoved` event
+    /// establishes a reference position).
+    pub fn new() -> Self {
+        Self {
+            state: InputState::default(),
+            last_mouse_screen: (0.0, 0.0),
+            needs_pan_baseline: false,
+        }
+    }
+
     /// Translate a winit [`WindowEvent`] into zero or more [`InputAction`]s.
     ///
     /// Updates `self.state` as a side effect (mouse position, button state,
