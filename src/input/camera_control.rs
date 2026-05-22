@@ -28,3 +28,71 @@ pub fn apply_camera_action(camera: &mut CameraState, action: &InputAction) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ecs::resources::CameraState;
+    use crate::geometry::Point2D;
+    use crate::input::InputAction;
+    use crate::util::Color;
+
+    use super::apply_camera_action;
+
+    #[test]
+    fn test_pan_moves_target() {
+        let mut camera = CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 1.0,
+            viewport_size: (1280, 720),
+            clear_color: Color::BLACK,
+        };
+        apply_camera_action(&mut camera, &InputAction::Pan(100.0, 50.0));
+        // Screen right → world left (dx is negated)
+        assert_eq!(camera.target.x, -100.0);
+        // Screen down → world up (Y inversion)
+        assert_eq!(camera.target.y, 50.0);
+    }
+
+    #[test]
+    fn test_zoom_zooms_toward_pivot() {
+        let mut camera = CameraState {
+            target: Point2D::new(10.0, 10.0),
+            zoom: 1.0,
+            viewport_size: (1280, 720),
+            clear_color: Color::BLACK,
+        };
+        apply_camera_action(&mut camera, &InputAction::Zoom(1.0, Point2D::new(0.0, 0.0)));
+        // zoom = 1.0 * 1.1^1
+        assert!((camera.zoom - 1.1).abs() < 0.001);
+        // target moves toward pivot: 10.0 / 1.1 ≈ 9.0909...
+        let expected = 10.0 / 1.1;
+        assert!((camera.target.x - expected).abs() < 0.001);
+        assert!((camera.target.y - expected).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_zoom_clamps_minimum() {
+        let mut camera = CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 0.00005,
+            viewport_size: (1280, 720),
+            clear_color: Color::BLACK,
+        };
+        // Zoom out with a large negative delta
+        apply_camera_action(&mut camera, &InputAction::Zoom(-10.0, Point2D::new(0.0, 0.0)));
+        assert!(camera.zoom >= 0.0001);
+    }
+
+    #[test]
+    fn test_pan_zero_zoom_does_not_panic() {
+        let mut camera = CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 0.0,
+            viewport_size: (1280, 720),
+            clear_color: Color::BLACK,
+        };
+        // Zoom=0 would cause division by zero without the max(0.0001) guard
+        apply_camera_action(&mut camera, &InputAction::Pan(10.0, 10.0));
+        // Guard ensures we don't panic; values may be extreme but stable
+    }
+}

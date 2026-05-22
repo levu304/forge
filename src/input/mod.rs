@@ -8,6 +8,7 @@ use crate::ecs::resources::{CameraState, InputState};
 use crate::geometry::Point2D;
 
 pub mod camera_control;
+pub use camera_control::apply_camera_action;
 pub mod command_input; // reserved — all keyboard handling is in input/mod.rs for v0.1.0
 
 /// Application-level input actions produced by the [`InputMapper`].
