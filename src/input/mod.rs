@@ -131,7 +131,8 @@ impl InputMapper {
                     MouseScrollDelta::LineDelta(_, y) => *y as f64,
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f64 / 100.0,
                 };
-                actions.push(InputAction::Zoom(dy, self.state.mouse_world));
+                let zoom_pivot = camera.screen_to_world(self.state.mouse_screen);
+                actions.push(InputAction::Zoom(dy, zoom_pivot));
             }
 
             // ── Keyboard ──────────────────────────────────────────────
