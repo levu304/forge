@@ -54,24 +54,13 @@ pub enum CommandResult {
 }
 
 /// Manages the active command and command history.
+#[derive(Default)]
 pub struct CommandState {
     pub active: Option<Box<dyn Command>>,
     pub history: Vec<String>, // Previous command strings
     pub buffer: String,       // Current command-line text
     pub last_error: Option<String>, // Most recent command error (displayed in UI)
     pub pending_dispatch: Option<String>, // Text waiting to be dispatched from UI command line
-}
-
-impl Default for CommandState {
-    fn default() -> Self {
-        Self {
-            active: None,
-            history: Vec::new(),
-            buffer: String::new(),
-            last_error: None,
-            pending_dispatch: None,
-        }
-    }
 }
 
 pub mod parser;
