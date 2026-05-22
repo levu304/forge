@@ -12,6 +12,36 @@
 
 use crate::geometry::Point2D;
 
+/// Compute the combined view-projection matrix from camera parameters.
+///
+/// This is the canonical implementation shared by `OrthographicCamera` and
+/// `CameraState`. The bounds are centred on `target` so the projection
+/// matrix encodes the camera position — no separate view translation
+/// matrix is needed.
+///
+/// ## Defensive clamping
+///
+/// `zoom` is clamped to a minimum of `0.0001` to prevent division by zero
+/// or numerical instability when zoom is uninitialised.
+pub(crate) fn compute_view_proj_matrix(
+    target: Point2D,
+    zoom: f64,
+    viewport_width: u32,
+    viewport_height: u32,
+) -> nalgebra::Matrix4<f32> {
+    let z = zoom.max(0.0001);
+    let half_w = (viewport_width as f64) / (2.0 * z);
+    let half_h = (viewport_height as f64) / (2.0 * z);
+
+    let left = (target.x - half_w) as f32;
+    let right = (target.x + half_w) as f32;
+    let bottom = (target.y - half_h) as f32;
+    let top = (target.y + half_h) as f32;
+
+    let proj = nalgebra::Orthographic3::new(left, right, bottom, top, -1.0, 1.0);
+    *proj.as_matrix()
+}
+
 /// Orthographic camera for the 2D viewport.
 ///
 /// Encapsulates the camera's world-space position, zoom level, and
@@ -57,16 +87,11 @@ impl OrthographicCamera {
     /// `self.zoom` is clamped to a minimum of `0.0001` to prevent division
     /// by zero or numerical instability when zoom is uninitialised.
     pub fn build_view_projection_matrix(&self) -> nalgebra::Matrix4<f32> {
-        let z = self.zoom.max(0.0001);
-        let half_w = (self.viewport_width as f64) / (2.0 * z);
-        let half_h = (self.viewport_height as f64) / (2.0 * z);
-
-        let left = (self.target.x - half_w) as f32;
-        let right = (self.target.x + half_w) as f32;
-        let bottom = (self.target.y - half_h) as f32;
-        let top = (self.target.y + half_h) as f32;
-
-        let proj = nalgebra::Orthographic3::new(left, right, bottom, top, -1.0, 1.0);
-        *proj.as_matrix()
+        compute_view_proj_matrix(
+            self.target,
+            self.zoom,
+            self.viewport_width as u32,
+            self.viewport_height as u32,
+        )
     }
 }
