@@ -4,6 +4,7 @@
 //! Pipeline order per frame: clear → grid → entities → UI overlay.
 
 pub mod camera;
+pub use camera::OrthographicCamera;
 pub mod grid;
 pub mod entity_renderer;
 pub mod shaders;
@@ -100,7 +101,11 @@ impl RenderState {
         // -- Surface config -----------------------------------------------------
         let size = window.inner_size();
         let caps = surface.get_capabilities(&adapter);
-        let surface_format = caps.formats[0];
+        let surface_format = caps
+            .formats
+            .first()
+            .copied()
+            .ok_or_else(|| ForgeError::Gpu("No compatible surface texture formats".into()))?;
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
