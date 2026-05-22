@@ -117,17 +117,12 @@ impl CameraState {
     /// `self.zoom` is clamped to a minimum of `0.0001` to prevent division
     /// by zero or numerical instability when the zoom is uninitialised.
     pub fn view_proj_matrix(&self) -> nalgebra::Matrix4<f32> {
-        let z = self.zoom.max(0.0001);
-        let half_w = (self.viewport_size.0 as f64) / (2.0 * z);
-        let half_h = (self.viewport_size.1 as f64) / (2.0 * z);
-
-        let left = (self.target.x - half_w) as f32;
-        let right = (self.target.x + half_w) as f32;
-        let bottom = (self.target.y - half_h) as f32;
-        let top = (self.target.y + half_h) as f32;
-
-        let proj = nalgebra::Orthographic3::new(left, right, bottom, top, -1.0, 1.0);
-        *proj.as_matrix()
+        crate::render::camera::compute_view_proj_matrix(
+            self.target,
+            self.zoom,
+            self.viewport_size.0,
+            self.viewport_size.1,
+        )
     }
 }
 
