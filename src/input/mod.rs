@@ -93,6 +93,7 @@ impl InputMapper {
     /// A fresh `Vec` is allocated on every call (including mouse-move events
     /// at 60 fps). This is acceptable for v0.1.0. Consider a small-vector
     /// optimisation or a reusable buffer for v0.2.0+.
+    #[must_use = "returned actions must be dispatched to the app loop (e.g., Click, Pan, Zoom)"]
     pub fn handle_event(
         &mut self,
         event: &winit::event::WindowEvent,
