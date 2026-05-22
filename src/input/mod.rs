@@ -180,8 +180,8 @@ impl InputMapper {
                     _ => {
                         // Individual keystrokes (not swallowed by egui).
                         if let Key::Character(c) = &event.logical_key {
-                            if c.len() == 1 {
-                                actions.push(InputAction::Text(c.chars().next().unwrap()));
+                            if let Some(ch) = c.chars().next() {
+                                actions.push(InputAction::Text(ch));
                             }
                         }
                     }
