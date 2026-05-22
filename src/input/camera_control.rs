@@ -124,6 +124,20 @@ mod tests {
     }
 
     #[test]
+    fn test_zoom_clamps_maximum() {
+        let mut camera = CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 200000.0, // already above max
+            viewport_size: (1280, 720),
+            clear_color: Color::BLACK,
+        };
+        // Zoom in aggressively — should clamp to 100000.0
+        apply_camera_action(&mut camera, &InputAction::Zoom(10.0, Point2D::new(0.0, 0.0)));
+        assert!(camera.zoom <= 100000.0, "zoom should be clamped to max 100000.0");
+        assert!(camera.zoom >= 0.0001, "zoom should still be within lower bound");
+    }
+
+    #[test]
     fn test_pan_zero_zoom_does_not_panic() {
         let mut camera = CameraState {
             target: Point2D::new(0.0, 0.0),
