@@ -1,7 +1,8 @@
 //! Input abstraction.
 //!
 //! Maps winit window events to application-level actions.
-//! Handles mouse, keyboard, and camera control events.
+//! Mouse and keyboard events are handled here; camera control (pan/zoom)
+//! is delegated to the `camera_control` submodule.
 
 use crate::ecs::resources::{CameraState, InputState};
 use crate::geometry::Point2D;
