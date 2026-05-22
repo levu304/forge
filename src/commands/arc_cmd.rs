@@ -6,6 +6,7 @@ use hecs::World;
 /// Interactive ARC command.
 ///
 /// Full implementation deferred to v0.2.0+.
+#[derive(Default)]
 pub struct ArcCommand;
 
 impl ArcCommand {

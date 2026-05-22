@@ -20,13 +20,14 @@ fn main() {
     event_loop.run_app(&mut app).expect("Event loop failed");
 }
 
+#[derive(Default)]
 pub struct ForgeAppHandler {
     window: Option<Arc<Window>>,
 }
 
 impl ForgeAppHandler {
     pub fn new() -> Self {
-        Self { window: None }
+        Self::default()
     }
 }
 

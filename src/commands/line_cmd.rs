@@ -20,6 +20,12 @@ pub struct LineCommand {
     preview_entity: Option<PreviewEntity>,
 }
 
+impl Default for LineCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LineCommand {
     pub fn new() -> Self {
         Self {
@@ -262,5 +268,27 @@ mod tests {
         // Undo on empty buffer — should not panic, just be a no-op
         let result = cmd.on_input(CommandInput::Text("U".to_string()), &mut world);
         assert!(matches!(result, CommandResult::Continue));
+    }
+
+    #[test]
+    fn test_confirm_empty_buffer() {
+        let mut cmd = LineCommand::new();
+        let mut world = create_world();
+
+        // Confirm with no points accumulated — should not spawn any entities
+        let result = cmd.on_input(CommandInput::Confirm, &mut world);
+
+        // Returns error because at least 2 points are needed
+        assert!(matches!(result, CommandResult::Error(_)));
+
+        // No entities should have been spawned
+        let mut count = 0;
+        for (_entity, (_line, _renderable)) in world.query::<(&LineData, &Renderable)>().iter() {
+            count += 1;
+        }
+        assert_eq!(count, 0);
+
+        // Command is still usable — prompt shows we're still at the first-point phase
+        assert_eq!(cmd.prompt(), "Specify first point:");
     }
 }
