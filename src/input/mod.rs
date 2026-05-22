@@ -102,7 +102,8 @@ impl InputMapper {
                 ElementState::Pressed => match button {
                     MouseButton::Left => {
                         self.state.left_down = true;
-                        actions.push(InputAction::Click(self.state.mouse_world));
+                        let click_world = camera.screen_to_world(self.state.mouse_screen);
+                        actions.push(InputAction::Click(click_world));
                     }
                     MouseButton::Middle => {
                         self.state.middle_down = true;
