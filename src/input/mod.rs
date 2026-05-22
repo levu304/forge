@@ -154,6 +154,9 @@ impl InputMapper {
                     MouseScrollDelta::LineDelta(_, y) => *y as f64,
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f64 / 100.0,
                 };
+                // Defensive clamp: limits zoom to ~2.6× per event (1.1^10 ≈ 2.59).
+                // Prevents extreme zoom from buggy drivers or synthetic events.
+                let dy = dy.clamp(-10.0, 10.0);
                 let zoom_pivot = camera.screen_to_world(self.state.mouse_screen);
                 actions.push(InputAction::Zoom(dy, zoom_pivot));
             }
