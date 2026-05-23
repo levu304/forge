@@ -232,6 +232,8 @@ pub struct EntityRenderer {
 
 impl EntityRenderer {
     /// Initial staging buffer size in bytes (~1365 vertices at 24 bytes each).
+    /// Unused while `new()` is a stub; will be used in follow-up implementation.
+    #[allow(dead_code)]
     const INITIAL_STAGING_SIZE: u64 = 32768;
 
     /// Create a new `EntityRenderer`.
