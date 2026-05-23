@@ -89,6 +89,11 @@ impl ApplicationHandler for ForgeAppHandler {
         let app = pollster::block_on(ForgeApp::new(window.clone()));
 
         self.state = Some(ForgeState { window, app });
+        // Request the first redraw so the viewport renders immediately.
+        // Subsequent frames are driven by `about_to_wait()` → `request_redraw()`.
+        if let Some(state) = &self.state {
+            state.window.request_redraw();
+        }
         tracing::info!("Forge v0.1.0 ready");
     }
 
@@ -130,6 +135,12 @@ impl ApplicationHandler for ForgeAppHandler {
                     .ui_system
                     .set_scale_factor(*scale_factor as f32);
                 state.window.request_redraw();
+                return;
+            }
+            WindowEvent::RedrawRequested => {
+                // Render one frame.  Continuous rendering is driven by
+                // `about_to_wait()` which calls `request_redraw()`.
+                state.app.render(&state.window);
                 return;
             }
             _ => {}
