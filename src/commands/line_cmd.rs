@@ -291,4 +291,141 @@ mod tests {
         // Command is still usable — prompt shows we're still at the first-point phase
         assert_eq!(cmd.prompt(), "Specify first point:");
     }
+
+    #[test]
+    fn test_on_cancel_direct() {
+        // Call on_cancel directly (not via Cancel input) to verify buffer clearing.
+        let mut cmd = LineCommand::new();
+        let mut world = create_world();
+
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(100.0, 100.0)), &mut world);
+
+        // Direct call to on_cancel (as CommandState::process_pending_cancel does).
+        cmd.on_cancel(&mut world);
+
+        // Buffer should be empty — prompt back to first-point phase.
+        assert_eq!(cmd.prompt(), "Specify first point:");
+
+        // No entities should have been spawned.
+        let mut count = 0;
+        for (_entity, (_line, _renderable)) in world.query::<(&LineData, &Renderable)>().iter() {
+            count += 1;
+        }
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_on_cancel_direct_empty() {
+        // Calling on_cancel on an empty command should be a no-op.
+        let mut cmd = LineCommand::new();
+        let mut world = create_world();
+        cmd.on_cancel(&mut world);
+        assert_eq!(cmd.prompt(), "Specify first point:");
+    }
+
+    #[test]
+    fn test_steps_remaining_after_undo_then_readd() {
+        let mut cmd = LineCommand::new();
+        let mut world = create_world();
+
+        assert_eq!(cmd.steps_remaining(), 2);
+
+        // Add first point
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+        assert_eq!(cmd.steps_remaining(), 1);
+
+        // Add second point
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(100.0, 0.0)), &mut world);
+        assert_eq!(cmd.steps_remaining(), 0);
+
+        // Undo second point
+        let _ = cmd.on_input(CommandInput::Text("U".to_string()), &mut world);
+        assert_eq!(cmd.steps_remaining(), 1);
+
+        // Add second point again
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(100.0, 100.0)), &mut world);
+        assert_eq!(cmd.steps_remaining(), 0);
+    }
+
+    #[test]
+    fn test_steps_remaining_after_undo_all_then_readd() {
+        let mut cmd = LineCommand::new();
+        let mut world = create_world();
+
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(100.0, 0.0)), &mut world);
+
+        // Undo both points
+        let _ = cmd.on_input(CommandInput::Text("U".to_string()), &mut world);
+        assert_eq!(cmd.steps_remaining(), 1);
+
+        let _ = cmd.on_input(CommandInput::Text("U".to_string()), &mut world);
+        assert_eq!(cmd.steps_remaining(), 2);
+
+        // Re-add and confirm
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(50.0, 50.0)), &mut world);
+        let result = cmd.on_input(CommandInput::Confirm, &mut world);
+        assert!(matches!(result, CommandResult::Complete));
+    }
+
+    #[test]
+    fn test_default_trait() {
+        let cmd = LineCommand::default();
+        assert_eq!(cmd.name(), "LINE");
+        assert_eq!(cmd.prompt(), "Specify first point:");
+        assert!(cmd.preview().is_empty());
+        assert_eq!(cmd.steps_remaining(), 2);
+    }
+
+    #[test]
+    fn test_distance_input_returns_error() {
+        let mut cmd = LineCommand::new();
+        let mut world = create_world();
+
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+        // Distance variant is reserved but should not panic.
+        let result = cmd.on_input(CommandInput::Distance(50.0), &mut world);
+        assert!(matches!(result, CommandResult::Error(_)));
+    }
+
+    #[test]
+    fn test_angle_input_returns_error() {
+        let mut cmd = LineCommand::new();
+        let mut world = create_world();
+
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+        // Angle variant is reserved but should not panic.
+        let result = cmd.on_input(CommandInput::Angle(90.0), &mut world);
+        assert!(matches!(result, CommandResult::Error(_)));
+    }
+
+    #[test]
+    fn test_multiple_undos_empty_buffer_no_panic() {
+        let mut cmd = LineCommand::new();
+        let mut world = create_world();
+
+        // Undo on empty buffer should be safe.
+        let result = cmd.on_input(CommandInput::Text("U".to_string()), &mut world);
+        assert!(matches!(result, CommandResult::Continue));
+        let result = cmd.on_input(CommandInput::Text("U".to_string()), &mut world);
+        assert!(matches!(result, CommandResult::Continue));
+        let result = cmd.on_input(CommandInput::Text("U".to_string()), &mut world);
+        assert!(matches!(result, CommandResult::Continue));
+    }
+
+    #[test]
+    fn test_text_close_noop() {
+        // "C" text should be treated as invalid input (LINE ignores close).
+        let mut cmd = LineCommand::new();
+        let mut world = create_world();
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(100.0, 100.0)), &mut world);
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(200.0, 200.0)), &mut world);
+
+        let result = cmd.on_input(CommandInput::Text("C".to_string()), &mut world);
+        // "C" is not "U" so it falls through to the error case.
+        assert!(matches!(result, CommandResult::Error(_)));
+    }
 }

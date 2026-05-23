@@ -30,8 +30,16 @@ pub(crate) fn compute_view_proj_matrix(
     viewport_height: u32,
 ) -> nalgebra::Matrix4<f32> {
     let z = zoom.max(0.0001);
-    let half_w = (viewport_width as f64) / (2.0 * z);
-    let half_h = (viewport_height as f64) / (2.0 * z);
+
+    // Guard against zero-viewport: if either dimension is zero, the
+    // orthographic projection would have left==right or bottom==top,
+    // which nalgebra::Orthographic3 rejects with a panic. We fall back
+    // to a 1x1 viewport in that case so the matrix remains valid.
+    let vw = if viewport_width == 0 { 1 } else { viewport_width };
+    let vh = if viewport_height == 0 { 1 } else { viewport_height };
+
+    let half_w = (vw as f64) / (2.0 * z);
+    let half_h = (vh as f64) / (2.0 * z);
 
     let left = (target.x - half_w) as f32;
     let right = (target.x + half_w) as f32;
@@ -93,5 +101,147 @@ impl OrthographicCamera {
             self.viewport_width as u32,
             self.viewport_height as u32,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::Point2D;
+
+    /// Check that all entries in the 4×4 matrix are finite (not NaN, not infinite).
+    fn assert_matrix_finite(m: &nalgebra::Matrix4<f32>) {
+        for i in 0..4 {
+            for j in 0..4 {
+                assert!(
+                    m[(i, j)].is_finite(),
+                    "entry [{}][{}] = {} is not finite",
+                    i,
+                    j,
+                    m[(i, j)]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_compute_view_proj_valid() {
+        let m = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 1.0, 1280, 720);
+        assert_matrix_finite(&m);
+        // Determinant must be non-zero (invertible projection).
+        assert_ne!(m.determinant(), 0.0);
+    }
+
+    #[test]
+    fn test_compute_view_proj_zoomed_in() {
+        let m = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 2.0, 1280, 720);
+        assert_matrix_finite(&m);
+        assert_ne!(m.determinant(), 0.0);
+    }
+
+    #[test]
+    fn test_compute_view_proj_zoomed_out() {
+        let m = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 0.5, 1280, 720);
+        assert_matrix_finite(&m);
+        assert_ne!(m.determinant(), 0.0);
+    }
+
+    #[test]
+    fn test_compute_view_proj_negative_target() {
+        let m = compute_view_proj_matrix(Point2D::new(-500.0, -300.0), 1.0, 1280, 720);
+        assert_matrix_finite(&m);
+        assert_ne!(m.determinant(), 0.0);
+    }
+
+    #[test]
+    fn test_compute_view_proj_zero_viewport() {
+        // Zero viewport should not panic; the matrix may have zero determinant
+        // (since left==right and bottom==top), but should produce finite values
+        // where possible.
+        let m = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 1.0, 0, 0);
+        // All values should be finite (defensive path).
+        assert_matrix_finite(&m);
+    }
+
+    #[test]
+    fn test_compute_view_proj_zero_zoom_clamped() {
+        // zoom=0 is clamped to 0.0001, so this should produce the same
+        // matrix as explicitly passing 0.0001.
+        let m_zero = compute_view_proj_matrix(Point2D::new(10.0, 20.0), 0.0, 800, 600);
+        let m_clamped = compute_view_proj_matrix(Point2D::new(10.0, 20.0), 0.0001, 800, 600);
+        assert_eq!(m_zero, m_clamped);
+    }
+
+    #[test]
+    fn test_compute_view_proj_negative_zoom_clamped() {
+        // Negative zoom should also be clamped to 0.0001.
+        let m_neg = compute_view_proj_matrix(Point2D::new(0.0, 0.0), -5.0, 100, 100);
+        let m_clamped = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 0.0001, 100, 100);
+        assert_eq!(m_neg, m_clamped);
+    }
+
+    #[test]
+    fn test_compute_view_proj_large_coordinates() {
+        // Very large world coordinates should not cause numerical blowup.
+        let m = compute_view_proj_matrix(Point2D::new(1e6, -1e6), 1.0, 1920, 1080);
+        assert_matrix_finite(&m);
+        assert_ne!(m.determinant(), 0.0);
+    }
+
+    #[test]
+    fn test_orthographic_camera_delegates() {
+        let cam = OrthographicCamera {
+            target: Point2D::new(5.0, -3.0),
+            zoom: 2.5,
+            viewport_width: 1024.0,
+            viewport_height: 768.0,
+        };
+        let m = cam.build_view_projection_matrix();
+        assert_matrix_finite(&m);
+        assert_ne!(m.determinant(), 0.0);
+
+        // Must match the free function with the same parameters.
+        let expected = compute_view_proj_matrix(
+            Point2D::new(5.0, -3.0),
+            2.5,
+            1024,
+            768,
+        );
+        assert_eq!(m, expected);
+    }
+
+    #[test]
+    fn test_orthographic_camera_zero_viewport() {
+        let cam = OrthographicCamera {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 1.0,
+            viewport_width: 0.0,
+            viewport_height: 0.0,
+        };
+        let m = cam.build_view_projection_matrix();
+        assert_matrix_finite(&m);
+    }
+
+    #[test]
+    fn test_orthographic_camera_zero_zoom() {
+        let cam = OrthographicCamera {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 0.0,
+            viewport_width: 1280.0,
+            viewport_height: 720.0,
+        };
+        let m = cam.build_view_projection_matrix();
+        assert_matrix_finite(&m);
+
+        // Must match the explicitly-clamped free function.
+        let expected = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 0.0001, 1280, 720);
+        assert_eq!(m, expected);
+    }
+
+    #[test]
+    fn test_tiny_viewport_finite() {
+        // Very small but non-zero viewport should still produce a valid matrix.
+        let m = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 1.0, 1, 1);
+        assert_matrix_finite(&m);
     }
 }

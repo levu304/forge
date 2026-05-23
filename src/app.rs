@@ -7,7 +7,7 @@
 //!
 //! # Ownership
 //!
-//! ```
+//! ```text
 //! ForgeApp
 //! ├── world          (hecs::World — entities & components)
 //! ├── resources      (ResourceBank — camera, grid config)

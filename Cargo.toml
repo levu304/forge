@@ -28,6 +28,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 pollster = "0.4"
 bytemuck = { version = "1.25", features = ["derive"] }
 
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "bench_viewport"
+harness = false
+
 [profile.release]
 opt-level = 3
 lto = "thin"

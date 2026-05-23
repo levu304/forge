@@ -286,6 +286,42 @@ mod tests {
         );
     }
 
+    // ── InputMapper construction ─────────────────────────────────
+
+    #[test]
+    fn input_mapper_new_default_state() {
+        let mapper = InputMapper::new();
+        // No buttons pressed.
+        assert!(!mapper.state.left_down);
+        assert!(!mapper.state.middle_down);
+        assert!(!mapper.state.right_down);
+        // No modifiers active.
+        assert!(!mapper.state.shift);
+        assert!(!mapper.state.ctrl);
+        assert!(!mapper.state.alt);
+        // Pan baseline not pending.
+        assert!(!mapper.needs_pan_baseline);
+    }
+
+    #[test]
+    fn input_state_default_values() {
+        let state = InputState::default();
+        assert_eq!(state.mouse_screen, (0.0, 0.0));
+        assert_eq!(state.mouse_world, Point2D::default());
+        assert!(!state.left_down);
+        assert!(!state.middle_down);
+        assert!(!state.right_down);
+        assert!(!state.shift);
+        assert!(!state.ctrl);
+        assert!(!state.alt);
+    }
+
+    #[test]
+    fn input_mapper_initial_mouse_position() {
+        let mapper = InputMapper::new();
+        assert_eq!(mapper.last_mouse_screen, (0.0, 0.0));
+    }
+
     /// `PixelDelta` with positive Y produces a **negative** `Zoom` delta
     /// (screen Y+ is down, world Y+ is up).
     #[test]
