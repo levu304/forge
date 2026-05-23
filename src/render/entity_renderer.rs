@@ -23,11 +23,40 @@ use crate::ecs::components::{
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/// Number of segments used to approximate a full circle (line strip).
-const CIRCLE_SEGMENTS: u32 = 64;
+/// Minimum number of segments used to approximate a full circle.
+/// Tiny circles (<1 screen pixel radius) use this minimum to avoid
+/// wasteful over-tessellation.
+const CIRCLE_MIN_SEGMENTS: u32 = 8;
 
-/// Minimum number of segments for an arc.
-const MIN_ARC_SEGMENTS: u32 = 8;
+/// Maximum number of segments used to approximate a full circle.
+/// Prevents buffer explosion for huge circles at high zoom.
+const CIRCLE_MAX_SEGMENTS: u32 = 256;
+
+/// Minimum number of segments for an arc (partial circle).
+const MIN_ARC_SEGMENTS: u32 = 4;
+
+// ─── Helper: compute circle/arc segment count ────────────────────────────────
+
+/// Compute the number of tessellation segments for a circle of the given
+/// radius at the given zoom level.
+///
+/// The segment count scales with the effective screen-space radius
+/// (`radius × zoom`) so that small circles use fewer segments (saving GPU
+/// bandwidth) and large circles use more (preserving visual quality).
+///
+/// Clamped to [`CIRCLE_MIN_SEGMENTS`, `CIRCLE_MAX_SEGMENTS`].
+///
+/// # Examples
+///
+/// - `radius * zoom = 0.5`   → 0.5 → clamped to 8
+/// - `radius * zoom = 50.0`  → 50
+/// - `radius * zoom = 500.0` → 256 (capped)
+#[inline]
+fn circle_segments_for_radius(radius: f64, zoom: f64) -> u32 {
+    let effective_radius = radius * zoom;
+    let segments = effective_radius.round().max(0.0) as u32;
+    segments.clamp(CIRCLE_MIN_SEGMENTS, CIRCLE_MAX_SEGMENTS)
+}
 
 // ─── Vertex ──────────────────────────────────────────────────────────────────
 
@@ -53,18 +82,21 @@ fn color_to_array(c: &crate::util::Color) -> [f32; 4] {
 
 /// Generate vertices for a circle approximation as a line strip.
 ///
-/// Produces precisely `CIRCLE_SEGMENTS + 1` vertices so the strip forms a
+/// Segment count is computed from the effective screen-space radius
+/// (`radius × zoom`) so small circles use fewer vertices and large circles
+/// stay smooth.  Produces `num_segments + 1` vertices so the strip forms a
 /// closed loop (the last vertex equals the first).  Pushes into `out` to
 /// avoid per-entity Vec allocations.
-fn generate_circle_vertices(circle: &CircleData, out: &mut Vec<EntityVertex>) {
+fn generate_circle_vertices(circle: &CircleData, zoom: f64, out: &mut Vec<EntityVertex>) {
     let col = color_to_array(&circle.color);
     let cx = circle.center.x;
     let cy = circle.center.y;
     let r = circle.radius;
-    let step = 2.0 * PI / CIRCLE_SEGMENTS as f64;
+    let num_segments = circle_segments_for_radius(r, zoom);
+    let step = 2.0 * PI / num_segments as f64;
 
-    out.reserve(CIRCLE_SEGMENTS as usize + 1);
-    for i in 0..=CIRCLE_SEGMENTS {
+    out.reserve(num_segments as usize + 1);
+    for i in 0..=num_segments {
         let theta = step * i as f64;
         out.push(EntityVertex {
             position: [(cx + r * theta.cos()) as f32, (cy + r * theta.sin()) as f32],
@@ -77,11 +109,11 @@ fn generate_circle_vertices(circle: &CircleData, out: &mut Vec<EntityVertex>) {
 
 /// Generate vertices for an arc approximation as a line strip.
 ///
-/// Segment count is proportional to the sweep angle, between
-/// `MIN_ARC_SEGMENTS` and `CIRCLE_SEGMENTS`. The last vertex is
-/// the end of the arc (not wrapped to start).  Pushes into `out` to
-/// avoid per-entity Vec allocations.
-fn generate_arc_vertices(arc: &ArcData, out: &mut Vec<EntityVertex>) {
+/// Segment count is proportional to the sweep angle and the effective
+/// screen-space radius (`radius × zoom`), between `MIN_ARC_SEGMENTS` and
+/// `CIRCLE_MAX_SEGMENTS`.  The last vertex is the end of the arc (not
+/// wrapped to start).  Pushes into `out` to avoid per-entity Vec allocations.
+fn generate_arc_vertices(arc: &ArcData, zoom: f64, out: &mut Vec<EntityVertex>) {
     let col = color_to_array(&arc.color);
     let cx = arc.center.x;
     let cy = arc.center.y;
@@ -92,9 +124,10 @@ fn generate_arc_vertices(arc: &ArcData, out: &mut Vec<EntityVertex>) {
     let end_rad = arc.end_angle * PI / 180.0;
     let sweep_rad = end_rad - start_rad;
 
-    // Scale segment count proportionally to the sweep.
+    // Full-circle segments at this radius/zoom, then scale by sweep.
+    let full_segments = circle_segments_for_radius(r, zoom);
     let sweep_fraction = sweep_rad.abs() / (2.0 * PI);
-    let num_segments = ((CIRCLE_SEGMENTS as f64) * sweep_fraction)
+    let num_segments = ((full_segments as f64) * sweep_fraction)
         .round()
         .max(MIN_ARC_SEGMENTS as f64) as u32;
 
@@ -282,6 +315,8 @@ impl EntityRenderer {
     ///
     /// * `encoder` — Active command encoder for this frame.
     /// * `view` — Colour attachment texture view.
+    /// * `zoom` — Current camera zoom factor (used for radius-dependent
+    ///   tessellation — larger zoom → more circle/arc segments).
     /// * `world` — The ECS world to query for entities.
     /// * `camera_bind_group` — Bind group holding the camera uniform buffer.
     /// * `queue` — Command queue (used for `write_buffer` on the staging buffers).
@@ -291,6 +326,7 @@ impl EntityRenderer {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
+        zoom: f64,
         world: &hecs::World,
         camera_bind_group: &wgpu::BindGroup,
         queue: &wgpu::Queue,
@@ -309,8 +345,8 @@ impl EntityRenderer {
         // ── 2. Collect vertices into scratch buffers ─────────────────────
 
         Self::collect_line_vertices(world, &mut self.line_scratch);
-        Self::collect_circle_vertices(world, &mut self.circle_scratch);
-        Self::collect_arc_vertices(world, &mut self.arc_scratch);
+        Self::collect_circle_vertices(world, zoom, &mut self.circle_scratch);
+        Self::collect_arc_vertices(world, zoom, &mut self.arc_scratch);
         Self::collect_polyline_vertices(world, &mut self.polyline_scratch);
 
         // ── 3. Upload to staging buffers (resize if needed) ──────────────
@@ -419,20 +455,23 @@ impl EntityRenderer {
     /// Collect vertices for all `CircleData + Renderable` entities.
     ///
     /// Calls `generate_circle_vertices` for each circle and appends to `out`.
-    fn collect_circle_vertices(world: &hecs::World, out: &mut Vec<EntityVertex>) {
+    /// The `zoom` parameter controls tessellation density (more zoom → more
+    /// segments for large circles).
+    fn collect_circle_vertices(world: &hecs::World, zoom: f64, out: &mut Vec<EntityVertex>) {
         let mut query = world.query::<(&CircleData, &Renderable)>();
         for (_, (circle, _)) in query.iter() {
-            generate_circle_vertices(circle, out);
+            generate_circle_vertices(circle, zoom, out);
         }
     }
 
     /// Collect vertices for all `ArcData + Renderable` entities.
     ///
     /// Calls `generate_arc_vertices` for each arc and appends to `out`.
-    fn collect_arc_vertices(world: &hecs::World, out: &mut Vec<EntityVertex>) {
+    /// The `zoom` parameter controls tessellation density.
+    fn collect_arc_vertices(world: &hecs::World, zoom: f64, out: &mut Vec<EntityVertex>) {
         let mut query = world.query::<(&ArcData, &Renderable)>();
         for (_, (arc, _)) in query.iter() {
-            generate_arc_vertices(arc, out);
+            generate_arc_vertices(arc, zoom, out);
         }
     }
 
@@ -440,9 +479,15 @@ impl EntityRenderer {
     ///
     /// Emits one vertex per point for each polyline; if `closed` and has
     /// at least 2 vertices, emits the first vertex again to close the loop.
+    ///
+    /// Entities with an empty vertex list are silently skipped to prevent
+    /// degenerate buffer ranges.
     fn collect_polyline_vertices(world: &hecs::World, out: &mut Vec<EntityVertex>) {
         let mut query = world.query::<(&PolylineData, &Renderable)>();
         for (_, (poly, _)) in query.iter() {
+            if poly.vertices.is_empty() {
+                continue;
+            }
             let col = color_to_array(&poly.color);
             // Emit one vertex per point.
             for point in &poly.vertices {
@@ -484,6 +529,12 @@ impl EntityRenderer {
         let needed_bytes = (vertices.len() * std::mem::size_of::<V>()) as u64;
 
         if needed_bytes > *capacity {
+            // Resize strategy:
+            //   - If capacity * 2 overflows u64 → jump to needed_bytes directly.
+            //   - If needed_bytes is within 2× of current capacity → double.
+            //   - If needed_bytes is huge (e.g. a single giant polyline) →
+            //     jump directly to needed_bytes (no wasteful over-doubling).
+            //   - Never drop below INITIAL_STAGING_SIZE.
             let new_size = (*capacity)
                 .checked_mul(2)
                 .map(|s| s.max(needed_bytes))
@@ -501,5 +552,244 @@ impl EntityRenderer {
 
         let bytes: &[u8] = bytemuck::cast_slice(vertices);
         queue.write_buffer(buffer, 0, bytes);
+    }
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ecs::components::{ArcData, CircleData, PolylineData};
+    use crate::util::Color;
+
+    // ── circle_segments_for_radius ─────────────────────────────────────────
+
+    #[test]
+    fn test_segments_tiny_radius_uses_minimum() {
+        // radius * zoom = 0.5 → clamped to CIRCLE_MIN_SEGMENTS (8)
+        let segs = circle_segments_for_radius(0.5, 1.0);
+        assert_eq!(segs, CIRCLE_MIN_SEGMENTS);
+    }
+
+    #[test]
+    fn test_segments_large_radius_capped_at_max() {
+        // radius * zoom = 500.0 → clamped to CIRCLE_MAX_SEGMENTS (256)
+        let segs = circle_segments_for_radius(500.0, 1.0);
+        assert_eq!(segs, CIRCLE_MAX_SEGMENTS);
+    }
+
+    #[test]
+    fn test_segments_scales_with_zoom() {
+        // radius 50 at zoom 1.0 → 50 segments
+        let segs_1x = circle_segments_for_radius(50.0, 1.0);
+        assert_eq!(segs_1x, 50);
+
+        // radius 50 at zoom 2.0 → 100 segments
+        let segs_2x = circle_segments_for_radius(50.0, 2.0);
+        assert_eq!(segs_2x, 100);
+
+        // radius 50 at zoom 0.1 → 5 → clamped to 8
+        let segs_half = circle_segments_for_radius(50.0, 0.1);
+        assert_eq!(segs_half, CIRCLE_MIN_SEGMENTS);
+    }
+
+    #[test]
+    fn test_segments_zero_radius_uses_minimum() {
+        let segs = circle_segments_for_radius(0.0, 1.0);
+        assert_eq!(segs, CIRCLE_MIN_SEGMENTS);
+    }
+
+    // ── generate_circle_vertices ──────────────────────────────────────────
+
+    #[test]
+    fn test_circle_vertex_count_varies_with_zoom() {
+        let circle = CircleData {
+            center: crate::geometry::Point2D::new(0.0, 0.0),
+            radius: 100.0,
+            color: Color::WHITE,
+            width: 1.0,
+        };
+
+        // At zoom 1.0: radius*zoom = 100 → 100 segments → 101 vertices
+        let mut buf = Vec::new();
+        generate_circle_vertices(&circle, 1.0, &mut buf);
+        // num_segments + 1 vertices (closed loop)
+        assert_eq!(buf.len(), 101);
+
+        // At zoom 0.05: radius*zoom = 5 → clamped to 8 → 9 vertices
+        buf.clear();
+        generate_circle_vertices(&circle, 0.05, &mut buf);
+        assert_eq!(buf.len(), 9);
+    }
+
+    #[test]
+    fn test_circle_vertices_form_closed_loop() {
+        let circle = CircleData {
+            center: crate::geometry::Point2D::new(10.0, 20.0),
+            radius: 50.0,
+            color: Color::WHITE,
+            width: 1.0,
+        };
+
+        let mut buf = Vec::new();
+        generate_circle_vertices(&circle, 1.0, &mut buf);
+
+        // First and last vertex should be identical (closed loop)
+        assert!(!buf.is_empty());
+        assert_eq!(buf.first().unwrap().position, buf.last().unwrap().position);
+    }
+
+    #[test]
+    fn test_circle_vertices_conserves_color() {
+        let circle = CircleData {
+            center: crate::geometry::Point2D::new(0.0, 0.0),
+            radius: 10.0,
+            color: Color::from_hex(0xFF0000), // red
+            width: 1.0,
+        };
+
+        let mut buf = Vec::new();
+        generate_circle_vertices(&circle, 1.0, &mut buf);
+
+        let expected_col = [1.0, 0.0, 0.0, 1.0];
+        for v in &buf {
+            assert_eq!(v.color, expected_col);
+        }
+    }
+
+    // ── generate_arc_vertices ─────────────────────────────────────────────
+
+    #[test]
+    fn test_arc_vertex_count_varies_with_zoom_and_sweep() {
+        let arc = ArcData {
+            center: crate::geometry::Point2D::new(0.0, 0.0),
+            radius: 100.0,
+            start_angle: 0.0,
+            end_angle: 90.0, // quarter circle
+            color: Color::WHITE,
+            width: 1.0,
+        };
+
+        // quarter circle at zoom 1.0: full=100, sweep_fraction=0.25 → 25
+        let mut buf = Vec::new();
+        generate_arc_vertices(&arc, 1.0, &mut buf);
+        assert_eq!(buf.len(), 26); // 25 + 1
+
+        // quarter circle at zoom 0.05: full=8 (min), sweep_fraction=0.25
+        // 8 * 0.25 = 2 → clamped to MIN_ARC_SEGMENTS (4) → 5 vertices
+        buf.clear();
+        generate_arc_vertices(&arc, 0.05, &mut buf);
+        assert_eq!(buf.len(), 5);
+    }
+
+    #[test]
+    fn test_arc_vertices_conserves_color() {
+        let arc = ArcData {
+            center: crate::geometry::Point2D::new(0.0, 0.0),
+            radius: 50.0,
+            start_angle: 0.0,
+            end_angle: 180.0,
+            color: Color::from_hex(0x00FF00), // green
+            width: 1.0,
+        };
+
+        let mut buf = Vec::new();
+        generate_arc_vertices(&arc, 1.0, &mut buf);
+
+        let expected_col = [0.0, 1.0, 0.0, 1.0];
+        for v in &buf {
+            assert_eq!(v.color, expected_col);
+        }
+    }
+
+    // ── collect_polyline_vertices (empty guard) ───────────────────────────
+
+    #[test]
+    fn test_empty_polyline_skipped() {
+        let mut world = hecs::World::new();
+
+        // Spawn a polyline with no vertices — should be silently skipped.
+        world.spawn((
+            PolylineData {
+                vertices: vec![],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        // Also spawn a non-empty polyline to prove the collection loop runs.
+        world.spawn((
+            PolylineData {
+                vertices: vec![
+                    crate::geometry::Point2D::new(0.0, 0.0),
+                    crate::geometry::Point2D::new(100.0, 0.0),
+                ],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_polyline_vertices(&world, &mut buf);
+
+        // Only the non-empty polyline should produce vertices (2 points).
+        assert_eq!(buf.len(), 2);
+    }
+
+    #[test]
+    fn test_empty_polyline_does_not_crash() {
+        let mut world = hecs::World::new();
+
+        // Only an empty polyline — should produce no vertices.
+        world.spawn((
+            PolylineData {
+                vertices: vec![],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_polyline_vertices(&world, &mut buf);
+        assert!(buf.is_empty());
+    }
+
+    // ── collect_line_vertices ─────────────────────────────────────────────
+
+    #[test]
+    fn test_line_vertices_two_per_entity() {
+        let mut world = hecs::World::new();
+
+        world.spawn((
+            crate::ecs::components::LineData {
+                start: crate::geometry::Point2D::new(0.0, 0.0),
+                end: crate::geometry::Point2D::new(100.0, 100.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.spawn((
+            crate::ecs::components::LineData {
+                start: crate::geometry::Point2D::new(10.0, 20.0),
+                end: crate::geometry::Point2D::new(30.0, 40.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &mut buf);
+
+        // 2 lines × 2 vertices each = 4
+        assert_eq!(buf.len(), 4);
     }
 }
