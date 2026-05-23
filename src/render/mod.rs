@@ -6,6 +6,7 @@
 pub mod camera;
 pub use camera::OrthographicCamera;
 pub mod grid;
+pub use grid::GridRenderer;
 pub mod entity_renderer;
 pub mod shaders;
 pub mod pipeline; // reserved — v0.2.0+ cleanup
@@ -14,7 +15,6 @@ use std::sync::Arc;
 
 use winit::dpi::PhysicalSize;
 
-use crate::geometry::Point2D;
 use crate::util::ForgeError;
 
 // ─── RenderState ────────────────────────────────────────────────────────────
@@ -159,7 +159,7 @@ impl RenderState {
             egui_wgpu::RendererOptions::default(),
         );
 
-        // -- Grid renderer (stub) ----------------------------------------------
+        // -- Grid renderer -------------------------------------------------------
         let grid_renderer = GridRenderer::new(&device, &camera_bind_group_layout, surface_format);
 
         // -- Entity renderer (stub) --------------------------------------------
@@ -192,75 +192,6 @@ impl RenderState {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
         }
-    }
-}
-
-// ─── GridRenderer ──────────────────────────────────────────────────────────
-
-/// Renders the background grid as a vertex-buffered line list.
-///
-/// Major and minor grid lines are generated within the visible world bounds
-/// and regenerated when the camera zoom/position changes significantly
-/// (≥10% shift). For v0.1.0, the `new()` and `render()` methods are stubs
-/// that will be implemented in a follow-up step.
-pub struct GridRenderer {
-    /// The render pipeline for grid lines.
-    pub pipeline: wgpu::RenderPipeline,
-    /// Buffer containing grid line vertices.
-    pub vertex_buffer: wgpu::Buffer,
-    /// Number of vertices in the vertex buffer.
-    pub num_vertices: u32,
-    /// Last camera target used for grid generation.
-    /// Compared against current camera to detect ≥10% shift
-    /// before triggering regeneration.
-    pub last_target: Point2D,
-    /// Last camera zoom used for grid generation.
-    pub last_zoom: f64,
-}
-
-impl GridRenderer {
-    /// Create a new `GridRenderer`.
-    ///
-    /// # Stub
-    ///
-    /// This method is a stub for v0.1.0. It creates a minimal pipeline
-    /// and an empty vertex buffer so the struct compiles. Full grid
-    /// generation is implemented in a follow-up step.
-    ///
-    /// # Arguments
-    /// * `camera_bind_group_layout` — Used to create the pipeline layout so
-    ///   the grid shader can bind the camera uniform at group(0), binding(0).
-    #[allow(unused_variables)]
-    pub fn new(
-        device: &wgpu::Device,
-        camera_bind_group_layout: &wgpu::BindGroupLayout,
-        surface_format: wgpu::TextureFormat,
-    ) -> Self {
-        todo!("Implement in follow-up step")
-    }
-
-    /// Force grid regeneration on the next render.
-    pub fn invalidate(&mut self) {
-        self.last_zoom = 0.0;
-        self.last_target = Point2D::default();
-    }
-
-    /// Render the grid into the given render pass.
-    ///
-    /// # Stub
-    ///
-    /// This method is a stub for v0.1.0 and will be implemented
-    /// in a follow-up step.
-    #[allow(unused_variables)]
-    pub fn render(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
-        camera: &crate::ecs::resources::CameraState,
-        grid: &crate::ecs::resources::GridConfig,
-        camera_bind_group: &wgpu::BindGroup,
-    ) {
-        todo!("Implement in follow-up step")
     }
 }
 
