@@ -289,7 +289,7 @@ mod tests {
     // ── InputMapper construction ─────────────────────────────────
 
     #[test]
-    fn input_mapper_new_default_state() {
+    fn test_input_mapper_new_default_state() {
         let mapper = InputMapper::new();
         // No buttons pressed.
         assert!(!mapper.state.left_down);
@@ -304,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn input_state_default_values() {
+    fn test_input_state_default_values() {
         let state = InputState::default();
         assert_eq!(state.mouse_screen, (0.0, 0.0));
         assert_eq!(state.mouse_world, Point2D::default());
