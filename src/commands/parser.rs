@@ -607,7 +607,7 @@ mod tests {
         assert_eq!(
             cmd,
             ParsedCommand::Line(LineArgs {
-                start: Some(Point2D::new(1e10, 2e10)),
+                start: Some(Point2D::new((1e10_f32) as f64, (2e10_f32) as f64)),
                 end: Some(Point2D::new((3e10_f32) as f64, (4e10_f32) as f64)),
             })
         );
