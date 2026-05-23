@@ -634,8 +634,14 @@ mod tests {
     #[test]
     fn test_parse_line_minimum_whitespace() {
         // Single space after command name.
-        let result = parse_command("L 0,0 1,1");
-        assert!(result.is_ok());
+        let (_, cmd) = parse_command("L 0,0 1,1").unwrap();
+        assert_eq!(
+            cmd,
+            ParsedCommand::Line(LineArgs {
+                start: Some(Point2D::new((0.0_f32) as f64, (0.0_f32) as f64)),
+                end: Some(Point2D::new((1.0_f32) as f64, (1.0_f32) as f64)),
+            })
+        );
     }
 
     #[test]
