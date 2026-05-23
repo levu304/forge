@@ -162,7 +162,41 @@ impl ForgeApp {
             bytemuck::cast_slice(vp_matrix.as_ref()),
         );
 
-        // ── 3. Grid pass (clear + draw) ──────────────────────────────────
+        // ── 3. Clear framebuffer (unconditional) ─────────────────────────
+        //
+        // Always clear the framebuffer to `clear_color` before any drawing.
+        // The grid pass (when visible) and entity pass both depend on a clean
+        // starting buffer — without this unconditional clear, a hidden grid
+        // would leave stale swapchain content visible.
+        {
+            let cc = &self.resources.camera.clear_color;
+            let _clear_pass =
+                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Clear Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: cc.r as f64,
+                                g: cc.g as f64,
+                                b: cc.b as f64,
+                                a: cc.a as f64,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            // No draw calls — drop `clear_pass` to finish the pass.
+            // The framebuffer is now clean for subsequent passes.
+        }
+
+        // ── 4. Grid pass (draw only — framebuffer already cleared) ────────
         if self.resources.grid.visible {
             self.render_state.grid_renderer.render(
                 &mut encoder,
@@ -264,7 +298,16 @@ impl ForgeApp {
             );
         }
 
-        // ── 5. Submit and present ─────────────────────────────────────────
+        // ── 5. Free textures no longer referenced by egui ─────────────────
+        //
+        // egui's `TexturesDelta::free` lists texture IDs that were evicted
+        // from the atlas (e.g. after a font atlas regeneration or DPI change).
+        // Failing to free them leaks GPU texture memory.
+        for texture_id in &ui_output.textures_delta.free {
+            self.render_state.egui_renderer.free_texture(texture_id);
+        }
+
+        // ── 6. Submit and present ──────────────────────────────────────────
         let mut cmds: Vec<wgpu::CommandBuffer> = Vec::with_capacity(1 + egui_cmdbufs.len());
         cmds.push(encoder.finish());
         cmds.extend(egui_cmdbufs);

@@ -5,9 +5,10 @@
 //!
 //! # Pipeline
 //!
-//! The grid is drawn as the **first** render pass each frame and uses
-//! `LoadOp::Clear` with `CameraState::clear_color` to clear the framebuffer
-//! before drawing.  Subsequent render passes (entities, UI) use `LoadOp::Load`.
+//! The grid is drawn **after** the unconditional clear pass (see
+//! [`crate::app::ForgeApp::render`]) and uses `LoadOp::Load` because the
+//! framebuffer is already cleared.  Subsequent passes (entities, UI) also
+//! use `LoadOp::Load`.
 
 use crate::ecs::resources::{CameraState, GridConfig};
 use crate::geometry::Point2D;
@@ -43,9 +44,9 @@ struct GridVertex {
 ///
 /// ## Render-pass contract
 ///
-/// `render()` begins a new render pass with `LoadOp::Clear` because the grid
-/// is always the first drawing operation each frame.  The clear colour comes
-/// from `CameraState::clear_color`.
+/// `render()` begins a new render pass with `LoadOp::Load` because the
+/// framebuffer is unconditionally cleared by
+/// [`crate::app::ForgeApp::render`] before the grid pass runs.
 pub struct GridRenderer {
     /// The render pipeline for grid lines.
     pub pipeline: wgpu::RenderPipeline,
@@ -180,8 +181,9 @@ impl GridRenderer {
 
     /// Render the grid into the active command encoder.
     ///
-    /// This is the **first** render pass each frame: it clears the colour
-    /// attachment with `camera.clear_color` before drawing grid lines.
+    /// This pass runs **after** the unconditional clear pass in
+    /// [`crate::app::ForgeApp::render`], so the colour attachment is
+    /// already cleared when this draw call begins.
     ///
     /// # Regeneration
     ///
@@ -254,7 +256,7 @@ impl GridRenderer {
             return;
         }
 
-        // ── Render pass (clear + grid) ───────────────────────────────────
+        // ── Render pass (draw only — framebuffer already cleared) ─────────
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Grid Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -262,12 +264,7 @@ impl GridRenderer {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: camera.clear_color.r as f64,
-                        g: camera.clear_color.g as f64,
-                        b: camera.clear_color.b as f64,
-                        a: camera.clear_color.a as f64,
-                    }),
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
