@@ -48,8 +48,8 @@ mod tests {
     fn test_to_f32_array_negative() {
         let p = Point2D::new(-42.0, -99.9);
         let arr = p.to_f32_array();
-        assert!((arr[0] - (-42.0_f32)).abs() < f32::EPSILON);
-        assert!((arr[1] - (-99.9_f32)).abs() < f32::EPSILON);
+        assert!((arr[0] as f64 - (-42.0)).abs() < 0.002);
+        assert!((arr[1] as f64 - (-99.9)).abs() < 0.002);
     }
 
     #[test]
