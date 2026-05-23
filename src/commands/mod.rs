@@ -61,6 +61,27 @@ pub struct CommandState {
     pub buffer: String,       // Current command-line text
     pub last_error: Option<String>, // Most recent command error (displayed in UI)
     pub pending_dispatch: Option<String>, // Text waiting to be dispatched from UI command line
+
+    /// Set to `true` by the UI when Escape is pressed with an active command.
+    /// Consumed by the event-loop layer (which has `&mut World`) to call
+    /// [`Command::on_cancel`] on the active command.
+    pub cancel_requested: bool,
+}
+
+impl CommandState {
+    /// If `cancel_requested` is set, calls `on_cancel` on the active command
+    /// (if any) and resets state. Should be called by the event-loop handler
+    /// at the start of each frame, where `World` is available mutably.
+    pub fn process_pending_cancel(&mut self, world: &mut World) {
+        if self.cancel_requested {
+            self.cancel_requested = false;
+            if let Some(ref mut cmd) = self.active {
+                cmd.on_cancel(world);
+            }
+            self.active = None;
+            self.last_error = None;
+        }
+    }
 }
 
 pub mod parser;

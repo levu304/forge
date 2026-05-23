@@ -59,6 +59,9 @@ pub fn draw(ui: &mut egui::Ui, cmd_state: &mut CommandState) {
 
                 if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     cmd_state.buffer.clear();
+                    if cmd_state.active.is_some() {
+                        cmd_state.cancel_requested = true;
+                    }
                 }
             });
         });
