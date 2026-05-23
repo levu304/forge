@@ -36,7 +36,7 @@ const MIN_ARC_SEGMENTS: u32 = 8;
 /// Layout matches `GridVertex` in `grid.rs` so shaders are interchangeable.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct EntityVertex {
+pub(super) struct EntityVertex {
     position: [f32; 2],
     color: [f32; 4],
 }
@@ -54,23 +54,23 @@ fn color_to_array(c: &crate::util::Color) -> [f32; 4] {
 /// Generate vertices for a circle approximation as a line strip.
 ///
 /// Produces precisely `CIRCLE_SEGMENTS + 1` vertices so the strip forms a
-/// closed loop (the last vertex equals the first).
-fn generate_circle_vertices(circle: &CircleData) -> Vec<EntityVertex> {
+/// closed loop (the last vertex equals the first).  Pushes into `out` to
+/// avoid per-entity Vec allocations.
+fn generate_circle_vertices(circle: &CircleData, out: &mut Vec<EntityVertex>) {
     let col = color_to_array(&circle.color);
     let cx = circle.center.x;
     let cy = circle.center.y;
     let r = circle.radius;
     let step = 2.0 * PI / CIRCLE_SEGMENTS as f64;
 
-    let mut verts = Vec::with_capacity(CIRCLE_SEGMENTS as usize + 1);
+    out.reserve(CIRCLE_SEGMENTS as usize + 1);
     for i in 0..=CIRCLE_SEGMENTS {
         let theta = step * i as f64;
-        verts.push(EntityVertex {
+        out.push(EntityVertex {
             position: [(cx + r * theta.cos()) as f32, (cy + r * theta.sin()) as f32],
             color: col,
         });
     }
-    verts
 }
 
 // ─── Helper: generate arc vertices ──────────────────────────────────────────
@@ -79,8 +79,9 @@ fn generate_circle_vertices(circle: &CircleData) -> Vec<EntityVertex> {
 ///
 /// Segment count is proportional to the sweep angle, between
 /// `MIN_ARC_SEGMENTS` and `CIRCLE_SEGMENTS`. The last vertex is
-/// the end of the arc (not wrapped to start).
-fn generate_arc_vertices(arc: &ArcData) -> Vec<EntityVertex> {
+/// the end of the arc (not wrapped to start).  Pushes into `out` to
+/// avoid per-entity Vec allocations.
+fn generate_arc_vertices(arc: &ArcData, out: &mut Vec<EntityVertex>) {
     let col = color_to_array(&arc.color);
     let cx = arc.center.x;
     let cy = arc.center.y;
@@ -99,15 +100,14 @@ fn generate_arc_vertices(arc: &ArcData) -> Vec<EntityVertex> {
 
     let step = sweep_rad / num_segments as f64;
 
-    let mut verts = Vec::with_capacity(num_segments as usize + 1);
+    out.reserve(num_segments as usize + 1);
     for i in 0..=num_segments {
         let theta = start_rad + step * i as f64;
-        verts.push(EntityVertex {
+        out.push(EntityVertex {
             position: [(cx + r * theta.cos()) as f32, (cy + r * theta.sin()) as f32],
             color: col,
         });
     }
-    verts
 }
 
 // ─── EntityRenderer implementation ──────────────────────────────────────────
@@ -115,9 +115,10 @@ fn generate_arc_vertices(arc: &ArcData) -> Vec<EntityVertex> {
 impl EntityRenderer {
     /// Create a new `EntityRenderer`.
     ///
-    /// Loads four WGSL shaders (line, circle — arc and polyline reuse one of
-    /// the two) and creates a dedicated render pipeline per entity type.
-    /// All pipelines share the `camera_bind_group_layout` for group(0).
+    /// Loads a single WGSL shader (`shaders/entity.wgsl`) and creates a
+    /// dedicated render pipeline per entity type (the shared shader is valid
+    /// for both LineList and LineStrip topologies).  All pipelines share a
+    /// single `PipelineLayout` built from `camera_bind_group_layout`.
     ///
     /// Initial staging buffers are 32 KiB each, doubling on overflow.
     ///
@@ -155,13 +156,14 @@ impl EntityRenderer {
         // ── Helper: create a pipeline given a shader source and topology ──
         let make_pipeline = |device: &wgpu::Device,
                              label: &str,
-                             shader_source: &str,
                              topology: wgpu::PrimitiveTopology,
                              layout: &wgpu::PipelineLayout|
          -> wgpu::RenderPipeline {
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(label),
-                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("shaders/entity.wgsl").into(),
+                ),
             });
 
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -203,64 +205,37 @@ impl EntityRenderer {
             })
         };
 
-        // ── Pipeline layouts ─────────────────────────────────────────────
-        let line_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Line Entity Pipeline Layout"),
+        // ── Single pipeline layout (shared by all 4 pipelines) ───────────
+        let entity_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Entity Pipeline Layout"),
             bind_group_layouts: &[Some(camera_bind_group_layout)],
             immediate_size: 0,
         });
-        let circle_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Circle Entity Pipeline Layout"),
-            bind_group_layouts: &[Some(camera_bind_group_layout)],
-            immediate_size: 0,
-        });
-        let arc_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Arc Entity Pipeline Layout"),
-            bind_group_layouts: &[Some(camera_bind_group_layout)],
-            immediate_size: 0,
-        });
-        let polyline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Polyline Entity Pipeline Layout"),
-            bind_group_layouts: &[Some(camera_bind_group_layout)],
-            immediate_size: 0,
-        });
-
-        // ── Shader sources ───────────────────────────────────────────────
-        let line_shader = include_str!("shaders/line.wgsl");
-        let circle_shader = include_str!("shaders/circle.wgsl");
-        // Arc and polyline reuse the line/circle shaders — topology differences
-        // are set in the pipeline primitive state, not in WGSL.
-        let arc_shader = circle_shader;
-        let polyline_shader = line_shader;
 
         // ── Pipelines ────────────────────────────────────────────────────
         let line_pipeline = make_pipeline(
             device,
             "Line Entity Render Pipeline",
-            line_shader,
             wgpu::PrimitiveTopology::LineList,
-            &line_layout,
+            &entity_layout,
         );
         let circle_pipeline = make_pipeline(
             device,
             "Circle Entity Render Pipeline",
-            circle_shader,
             wgpu::PrimitiveTopology::LineStrip,
-            &circle_layout,
+            &entity_layout,
         );
         let arc_pipeline = make_pipeline(
             device,
             "Arc Entity Render Pipeline",
-            arc_shader,
             wgpu::PrimitiveTopology::LineStrip,
-            &arc_layout,
+            &entity_layout,
         );
         let polyline_pipeline = make_pipeline(
             device,
             "Polyline Entity Render Pipeline",
-            polyline_shader,
             wgpu::PrimitiveTopology::LineList,
-            &polyline_layout,
+            &entity_layout,
         );
 
         // ── Staging buffers (32 KiB each) ────────────────────────────────
@@ -288,13 +263,18 @@ impl EntityRenderer {
             circle_staging_capacity: staging_size,
             arc_staging_capacity: staging_size,
             polyline_staging_capacity: staging_size,
+            line_scratch: Vec::new(),
+            circle_scratch: Vec::new(),
+            arc_scratch: Vec::new(),
+            polyline_scratch: Vec::new(),
         }
     }
 
     /// Render all entities from the ECS world.
     ///
     /// For each entity type (Line, Circle, Arc, Polyline) with a `Renderable`
-    /// marker, vertex data is generated, uploaded to the respective staging
+    /// marker, vertex data is generated into per-type scratch buffers (reused
+    /// each frame to avoid allocation), uploaded to the respective staging
     /// buffer, and drawn in a single render pass.  Staging buffers are
     /// automatically doubled if they overflow.
     ///
@@ -316,21 +296,31 @@ impl EntityRenderer {
         queue: &wgpu::Queue,
         device: &wgpu::Device,
     ) {
-        // ── 1. Generate per-type vertex lists ────────────────────────────
+        // ── 1. Clear per-type scratch buffers ────────────────────────────
+        // These are reused every frame — clearing sets len = 0 without
+        // freeing the backing allocation, so the buffer grows only to its
+        // watermark and stops allocating.
 
-        let line_vertices = self.collect_line_vertices(world);
-        let circle_vertices = self.collect_circle_vertices(world);
-        let arc_vertices = self.collect_arc_vertices(world);
-        let polyline_vertices = self.collect_polyline_vertices(world);
+        self.line_scratch.clear();
+        self.circle_scratch.clear();
+        self.arc_scratch.clear();
+        self.polyline_scratch.clear();
 
-        // ── 2. Upload to staging buffers (resize if needed) ──────────────
+        // ── 2. Collect vertices into scratch buffers ─────────────────────
+
+        Self::collect_line_vertices(world, &mut self.line_scratch);
+        Self::collect_circle_vertices(world, &mut self.circle_scratch);
+        Self::collect_arc_vertices(world, &mut self.arc_scratch);
+        Self::collect_polyline_vertices(world, &mut self.polyline_scratch);
+
+        // ── 3. Upload to staging buffers (resize if needed) ──────────────
 
         Self::upload_vertices::<EntityVertex>(
             queue,
             device,
             &mut self.line_staging,
             &mut self.line_staging_capacity,
-            &line_vertices,
+            &self.line_scratch,
             "Line Entity Staging Buffer",
         );
         Self::upload_vertices::<EntityVertex>(
@@ -338,7 +328,7 @@ impl EntityRenderer {
             device,
             &mut self.circle_staging,
             &mut self.circle_staging_capacity,
-            &circle_vertices,
+            &self.circle_scratch,
             "Circle Entity Staging Buffer",
         );
         Self::upload_vertices::<EntityVertex>(
@@ -346,7 +336,7 @@ impl EntityRenderer {
             device,
             &mut self.arc_staging,
             &mut self.arc_staging_capacity,
-            &arc_vertices,
+            &self.arc_scratch,
             "Arc Entity Staging Buffer",
         );
         Self::upload_vertices::<EntityVertex>(
@@ -354,11 +344,11 @@ impl EntityRenderer {
             device,
             &mut self.polyline_staging,
             &mut self.polyline_staging_capacity,
-            &polyline_vertices,
+            &self.polyline_scratch,
             "Polyline Entity Staging Buffer",
         );
 
-        // ── 3. Single render pass (LoadOp::Load — grid already cleared) ──
+        // ── 4. Single render pass (LoadOp::Load — grid already cleared) ──
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Entity Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -376,98 +366,99 @@ impl EntityRenderer {
             multiview_mask: None,
         });
 
-        // ── 4. Draw each non-empty type ───────────────────────────────────
-        if !line_vertices.is_empty() {
+        // ── 5. Draw each non-empty type ──────────────────────────────────
+        if !self.line_scratch.is_empty() {
             render_pass.set_pipeline(&self.line_pipeline);
             render_pass.set_bind_group(0, camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.line_staging.slice(..));
-            render_pass.draw(0..line_vertices.len() as u32, 0..1);
+            render_pass.draw(0..self.line_scratch.len() as u32, 0..1);
         }
 
-        if !circle_vertices.is_empty() {
+        if !self.circle_scratch.is_empty() {
             render_pass.set_pipeline(&self.circle_pipeline);
             render_pass.set_bind_group(0, camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.circle_staging.slice(..));
-            render_pass.draw(0..circle_vertices.len() as u32, 0..1);
+            render_pass.draw(0..self.circle_scratch.len() as u32, 0..1);
         }
 
-        if !arc_vertices.is_empty() {
+        if !self.arc_scratch.is_empty() {
             render_pass.set_pipeline(&self.arc_pipeline);
             render_pass.set_bind_group(0, camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.arc_staging.slice(..));
-            render_pass.draw(0..arc_vertices.len() as u32, 0..1);
+            render_pass.draw(0..self.arc_scratch.len() as u32, 0..1);
         }
 
-        if !polyline_vertices.is_empty() {
+        if !self.polyline_scratch.is_empty() {
             render_pass.set_pipeline(&self.polyline_pipeline);
             render_pass.set_bind_group(0, camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.polyline_staging.slice(..));
-            render_pass.draw(0..polyline_vertices.len() as u32, 0..1);
+            render_pass.draw(0..self.polyline_scratch.len() as u32, 0..1);
         }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────
 
     /// Collect vertices for all `LineData + Renderable` entities.
-    fn collect_line_vertices(&self, world: &hecs::World) -> Vec<EntityVertex> {
+    ///
+    /// Appends 2 vertices (start, end) per entity to `out`.
+    fn collect_line_vertices(world: &hecs::World, out: &mut Vec<EntityVertex>) {
         let mut query = world.query::<(&LineData, &Renderable)>();
-        let mut verts = Vec::new();
         for (_, (line, _)) in query.iter() {
             let col = color_to_array(&line.color);
-            verts.push(EntityVertex {
+            out.push(EntityVertex {
                 position: line.start.to_f32_array(),
                 color: col,
             });
-            verts.push(EntityVertex {
+            out.push(EntityVertex {
                 position: line.end.to_f32_array(),
                 color: col,
             });
         }
-        verts
     }
 
     /// Collect vertices for all `CircleData + Renderable` entities.
-    fn collect_circle_vertices(&self, world: &hecs::World) -> Vec<EntityVertex> {
+    ///
+    /// Calls `generate_circle_vertices` for each circle and appends to `out`.
+    fn collect_circle_vertices(world: &hecs::World, out: &mut Vec<EntityVertex>) {
         let mut query = world.query::<(&CircleData, &Renderable)>();
-        let mut verts = Vec::new();
         for (_, (circle, _)) in query.iter() {
-            verts.extend(generate_circle_vertices(circle));
+            generate_circle_vertices(circle, out);
         }
-        verts
     }
 
     /// Collect vertices for all `ArcData + Renderable` entities.
-    fn collect_arc_vertices(&self, world: &hecs::World) -> Vec<EntityVertex> {
+    ///
+    /// Calls `generate_arc_vertices` for each arc and appends to `out`.
+    fn collect_arc_vertices(world: &hecs::World, out: &mut Vec<EntityVertex>) {
         let mut query = world.query::<(&ArcData, &Renderable)>();
-        let mut verts = Vec::new();
         for (_, (arc, _)) in query.iter() {
-            verts.extend(generate_arc_vertices(arc));
+            generate_arc_vertices(arc, out);
         }
-        verts
     }
 
     /// Collect vertices for all `PolylineData + Renderable` entities.
-    fn collect_polyline_vertices(&self, world: &hecs::World) -> Vec<EntityVertex> {
+    ///
+    /// Emits one vertex per point for each polyline; if `closed` and has
+    /// at least 2 vertices, emits the first vertex again to close the loop.
+    fn collect_polyline_vertices(world: &hecs::World, out: &mut Vec<EntityVertex>) {
         let mut query = world.query::<(&PolylineData, &Renderable)>();
-        let mut verts = Vec::new();
         for (_, (poly, _)) in query.iter() {
             let col = color_to_array(&poly.color);
             // Emit one vertex per point.
             for point in &poly.vertices {
-                verts.push(EntityVertex {
+                out.push(EntityVertex {
                     position: point.to_f32_array(),
                     color: col,
                 });
             }
             // If closed, emit the first vertex again to close the loop.
             if poly.closed && poly.vertices.len() > 1 {
-                verts.push(EntityVertex {
+                out.push(EntityVertex {
                     position: poly.vertices[0].to_f32_array(),
                     color: col,
                 });
             }
         }
-        verts
     }
 
     /// Upload vertex data to a staging buffer, growing it if necessary.

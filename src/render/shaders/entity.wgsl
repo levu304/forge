@@ -1,12 +1,10 @@
-// Circle/Arc entity vertex/fragment shaders.
+// Generic entity vertex/fragment shaders.
 //
-// Renders 2D circles and arcs as coloured line strips. The vertex shader
-// transforms world-space positions through the camera view-projection
-// matrix. The fragment shader passes through per-vertex colours.
+// Used by both LineList (lines, polylines) and LineStrip (circles, arcs)
+// pipelines — the topology is set in the Rust-side pipeline descriptor.
 //
-// The Rust-side pipeline uses `LineStrip` topology for both circles
-// and arcs (vertex format is identical to lines: position at location 0,
-// colour at location 1).
+// Vertex format: position (vec2<f32>) at location 0, colour (vec4<f32>)
+// at location 1.
 
 struct VertexInput {
     @location(0) position: vec2<f32>,

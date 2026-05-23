@@ -16,6 +16,7 @@ use std::sync::Arc;
 use winit::dpi::PhysicalSize;
 
 use crate::util::ForgeError;
+use self::entity_renderer::EntityVertex;
 
 // ─── RenderState ────────────────────────────────────────────────────────────
 
@@ -228,6 +229,14 @@ pub struct EntityRenderer {
     pub arc_staging_capacity: u64,
     /// Capacity (in bytes) of the polyline staging buffer.
     pub polyline_staging_capacity: u64,
+    /// Reusable scratch buffer for line vertices (cleared each frame).
+    line_scratch: Vec<EntityVertex>,
+    /// Reusable scratch buffer for circle vertices.
+    circle_scratch: Vec<EntityVertex>,
+    /// Reusable scratch buffer for arc vertices.
+    arc_scratch: Vec<EntityVertex>,
+    /// Reusable scratch buffer for polyline vertices.
+    polyline_scratch: Vec<EntityVertex>,
 }
 
 impl EntityRenderer {
