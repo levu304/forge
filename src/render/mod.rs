@@ -232,48 +232,5 @@ pub struct EntityRenderer {
 
 impl EntityRenderer {
     /// Initial staging buffer size in bytes (~1365 vertices at 24 bytes each).
-    /// Unused while `new()` is a stub; will be used in follow-up implementation.
-    #[allow(dead_code)]
     const INITIAL_STAGING_SIZE: u64 = 32768;
-
-    /// Create a new `EntityRenderer`.
-    ///
-    /// # Stub
-    ///
-    /// This method is a stub for v0.1.0. It creates minimal pipelines and
-    /// staging buffers so the struct compiles. Full entity batching and
-    /// rendering is implemented in a follow-up step.
-    ///
-    /// # Arguments
-    /// * `camera_bind_group_layout` — Used to create the pipeline layout so
-    ///   entity shaders can bind the camera uniform at group(0), binding(0).
-    #[allow(unused_variables)]
-    pub fn new(
-        device: &wgpu::Device,
-        camera_bind_group_layout: &wgpu::BindGroupLayout,
-        surface_format: wgpu::TextureFormat,
-    ) -> Self {
-        todo!("Implement in follow-up step")
-    }
-
-    /// Render all entities from the ECS world.
-    ///
-    /// Queries the `hecs::World` for `Renderable` entities, generates
-    /// vertex data for each entity, writes it to the appropriate staging
-    /// buffer, and issues draw calls.
-    ///
-    /// # Stub
-    ///
-    /// This method is a stub for v0.1.0 and will be implemented
-    /// in a follow-up step.
-    #[allow(unused_variables)]
-    pub fn render(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
-        world: &hecs::World,
-        camera_bind_group: &wgpu::BindGroup,
-    ) {
-        todo!("Implement in follow-up step")
-    }
 }
