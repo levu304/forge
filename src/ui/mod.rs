@@ -18,6 +18,15 @@ use crate::commands::CommandState;
 use crate::ecs::resources::{CameraState, InputState};
 use egui::ViewportId;
 
+/// Output from one egui frame, carrying both rendered shapes and
+/// texture changes (font atlas, images). The caller must pass
+/// `textures_delta` to [`egui_wgpu::Renderer::update_textures`]
+/// before the UI render pass so GPU-side textures stay in sync.
+pub struct UiOutput {
+    pub shapes: Vec<egui::epaint::ClippedShape>,
+    pub textures_delta: egui::TexturesDelta,
+}
+
 /// Owns the egui context and winit integration state.
 ///
 /// Dispatches draw calls to the four UI panels every frame.
@@ -61,7 +70,7 @@ impl UiSystem {
         input: &InputState,
         cmd_state: &mut CommandState,
         world: &hecs::World,
-    ) -> Vec<egui::epaint::ClippedShape> {
+    ) -> UiOutput {
         let raw_input = self.egui_state.take_egui_input(window);
         let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
             // All draw functions accept &mut Ui (the root UI) and
@@ -75,7 +84,10 @@ impl UiSystem {
         self.egui_state
             .handle_platform_output(window, full_output.platform_output);
 
-        full_output.shapes
+        UiOutput {
+            shapes: full_output.shapes,
+            textures_delta: full_output.textures_delta,
+        }
     }
 
     /// Update the egui pixels-per-point for a new scale factor.
