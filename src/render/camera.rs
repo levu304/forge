@@ -162,6 +162,22 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_view_proj_partial_zero_viewport_width() {
+        // Width=0 clamped to 1, height=720 should produce a valid matrix.
+        let m = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 1.0, 0, 720);
+        assert_matrix_finite(&m);
+        assert_ne!(m.determinant(), 0.0);
+    }
+
+    #[test]
+    fn test_compute_view_proj_partial_zero_viewport_height() {
+        // Height=0 clamped to 1, width=1280 should produce a valid matrix.
+        let m = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 1.0, 1280, 0);
+        assert_matrix_finite(&m);
+        assert_ne!(m.determinant(), 0.0);
+    }
+
+    #[test]
     fn test_compute_view_proj_zero_zoom_clamped() {
         // zoom=0 is clamped to 0.0001, so this should produce the same
         // matrix as explicitly passing 0.0001.
