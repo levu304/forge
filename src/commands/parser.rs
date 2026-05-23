@@ -548,4 +548,149 @@ mod tests {
             })
         );
     }
+
+    // ── Additional edge-case tests ────────────────────────────────────
+
+    #[test]
+    fn test_parse_empty_string() {
+        assert!(parse_command("").is_err());
+    }
+
+    #[test]
+    fn test_parse_whitespace_only() {
+        assert!(parse_command("   ").is_err());
+        assert!(parse_command("\t").is_err());
+        assert!(parse_command("  \t  ").is_err());
+    }
+
+    #[test]
+    fn test_parse_tabs_between_args() {
+        // Tabs should be treated as whitespace by space0/space1.
+        let result = parse_command("LINE\t0,0\t100,100");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Line(LineArgs {
+                start: Some(Point2D::new(0.0, 0.0)),
+                end: Some(Point2D::new(100.0, 100.0)),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_line_tab_between_coords() {
+        // Tab between x and y: "0,\t0".
+        let result = parse_command("LINE 0,\t0 100,\t100");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Line(LineArgs {
+                start: Some(Point2D::new(0.0, 0.0)),
+                end: Some(Point2D::new(100.0, 100.0)),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_line_very_large_coords() {
+        // nom's float can handle large scientific notation values.
+        // NOTE: nom's float parser produces f32, so values are cast to f64
+        // after f32 precision loss. We compare against the f32-rounded value.
+        let result = parse_command("LINE 1e10,2e10 3e10,4e10");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Line(LineArgs {
+                start: Some(Point2D::new((1e10_f32) as f64, (2e10_f32) as f64)),
+                end: Some(Point2D::new((3e10_f32) as f64, (4e10_f32) as f64)),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_line_very_small_coords() {
+        // Very small fractional values.
+        // NOTE: nom's float parser produces f32, so values are cast to f64
+        // after f32 precision loss. We compare against the f32-rounded value.
+        let result = parse_command("LINE 1e-10,2e-10 3e-10,4e-10");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Line(LineArgs {
+                start: Some(Point2D::new((1e-10_f32) as f64, (2e-10_f32) as f64)),
+                end: Some(Point2D::new((3e-10_f32) as f64, (4e-10_f32) as f64)),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_line_minimum_whitespace() {
+        // Single space after command name.
+        let (_, cmd) = parse_command("L 0,0 1,1").unwrap();
+        assert_eq!(
+            cmd,
+            ParsedCommand::Line(LineArgs {
+                start: Some(Point2D::new((0.0_f32) as f64, (0.0_f32) as f64)),
+                end: Some(Point2D::new((1.0_f32) as f64, (1.0_f32) as f64)),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_line_trailing_newline() {
+        // Trailing whitespace (including newline) is left in remaining.
+        let result = parse_command("LINE 0,0 100,100\n");
+        assert!(result.is_ok());
+        let (remaining, _cmd) = result.unwrap();
+        assert_eq!(remaining, "\n");
+    }
+
+    #[test]
+    fn test_parse_point_negative() {
+        let result = parse_point("-10.5,-20.75");
+        assert_eq!(result, Ok(("", Point2D::new(-10.5, -20.75))));
+    }
+
+    #[test]
+    fn test_parse_point_scientific() {
+        // NOTE: nom's float parses to f32, so we expect f32-rounded values.
+        let result = parse_point("1.5e2,3.0e-1");
+        assert_eq!(result, Ok(("", Point2D::new(150.0, (0.3_f32) as f64))));
+    }
+
+    #[test]
+    fn test_parse_point_extra_chars_fails() {
+        // "abc" is not a valid point.
+        assert!(parse_point("abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_point_missing_comma() {
+        // No comma between numbers — should fail.
+        assert!(parse_point("10 20").is_err());
+    }
+
+    #[test]
+    fn test_parse_circle_negative_radius() {
+        // Negative radius is syntactically valid; semantic validation is
+        // the command's responsibility.
+        let result = parse_command("CIRCLE 0,0 -5");
+        assert!(result.is_ok());
+        let (_remaining, cmd) = result.unwrap();
+        assert_eq!(
+            cmd,
+            ParsedCommand::Circle(CircleArgs {
+                center: Some(Point2D::new(0.0, 0.0)),
+                radius: Some(-5.0),
+            })
+        );
+    }
 }
