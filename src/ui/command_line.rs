@@ -39,13 +39,12 @@ pub fn draw(ui: &mut egui::Ui, cmd_state: &mut CommandState) {
 
                 // Detect Enter keypress.
                 // text_edit_singleline retains focus on Enter, so lost_focus()
-                // alone won't trigger. Check key_pressed independently too.
-                let submit_enter = response.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let submit_focused = response.has_focus()
+                // is never true simultaneously with Enter. Only has_focus()
+                // detects the keypress correctly.
+                let submit = response.has_focus()
                     && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
-                if submit_enter || submit_focused {
+                if submit {
                     let text = cmd_state.buffer.trim().to_string();
                     if !text.is_empty() {
                         cmd_state.history.push(text.clone());
