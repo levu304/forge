@@ -5,6 +5,10 @@
 
 use crate::commands::CommandState;
 
+/// Maximum number of commands to retain in history.
+/// Prevents unbounded memory growth over long CAD sessions.
+const MAX_HISTORY: usize = 1000;
+
 /// Draw the command line panel immediately above the status bar.
 ///
 /// Shows:
@@ -45,6 +49,9 @@ pub fn draw(ui: &mut egui::Ui, cmd_state: &mut CommandState) {
                     let text = cmd_state.buffer.trim().to_string();
                     if !text.is_empty() {
                         cmd_state.history.push(text.clone());
+                        if cmd_state.history.len() > MAX_HISTORY {
+                            cmd_state.history.drain(..cmd_state.history.len() - MAX_HISTORY);
+                        }
                         cmd_state.pending_dispatch = Some(text);
                         cmd_state.buffer.clear();
                     }
