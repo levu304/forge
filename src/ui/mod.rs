@@ -73,8 +73,10 @@ impl UiSystem {
     ) -> UiOutput {
         let raw_input = self.egui_state.take_egui_input(window);
         let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
-            // All draw functions accept &mut Ui (the root UI) and
-            // use Panel::show_inside for their respective panels.
+            // Panel drawing functions accept &mut egui::Ui and use
+            // egui::Panel::show_inside for proper window-edge docking.
+            // This is the non-deprecated API in egui 0.34 (TopBottomPanel
+            // and SidePanel aliases are deprecated; use Panel directly).
             status_bar::draw(ui, camera, input);
             toolbar::draw(ui, cmd_state);
             property_panel::draw(ui, world);
