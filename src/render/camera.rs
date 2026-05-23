@@ -155,12 +155,10 @@ mod tests {
 
     #[test]
     fn test_compute_view_proj_zero_viewport() {
-        // Zero viewport should not panic; the matrix may have zero determinant
-        // (since left==right and bottom==top), but should produce finite values
-        // where possible.
+        // Zero viewport is clamped to 1x1 — matrix should be fully valid.
         let m = compute_view_proj_matrix(Point2D::new(0.0, 0.0), 1.0, 0, 0);
-        // All values should be finite (defensive path).
         assert_matrix_finite(&m);
+        assert_ne!(m.determinant(), 0.0);
     }
 
     #[test]
