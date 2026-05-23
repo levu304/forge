@@ -30,6 +30,12 @@
       "sourceType": "github",
       "skillPath": ".claude/skills/tauri-v2/SKILL.md",
       "computedHash": "377c61c46cf48c35b942042bc8abb9a039049a47f37d7f12b4f491d012777490"
+    },
+    "webgpu": {
+      "source": "cazala/webgpu-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "1564faa76628b06e13d12862db1e8c4d9ba8c3f13561aadd5068c242d88a75bf"
     }
   }
 }
