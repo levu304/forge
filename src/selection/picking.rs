@@ -374,14 +374,17 @@ impl PickingPass {
                 resolve_target: None,
                 depth_slice: None,
                 ops: wgpu::Operations {
-                    // Clear to sentinel value (R = 0xFFFFFFFF, G = 0, B = 0, A = 0xFF)
-                    // wgpu::Color components are f64 but mapped to the uint format as
-                    // the bit pattern of the f64 value is NOT used — wgpu interprets
-                    // clear values according to the texture format.
-                    // For Rgba32Uint, the clear value is the raw uint. wgpu::Color
-                    // encodes this as: r = (value as f64) / (u32::MAX as f64).
+                    // Clear to sentinel value (R = 0xFFFFFFFF, G = 0, B = 0, A = 0xFF).
+                    //
+                    // For integer texture formats (Rgba32Uint), wgpu casts each
+                    // wgpu::Color f64 component directly to the channel's uint type:
+                    //   `value as u32`
+                    // It does NOT normalise through [0, 1] — that only happens for
+                    // float-format textures. So to get 0xFFFFFFFF in the R channel
+                    // we write 4294967295.0 (= PICKING_SENTINEL as f64), which
+                    // truncates to 4294967295u32 = 0xFFFFFFFF.
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: PICKING_SENTINEL as f64 / u32::MAX as f64,
+                        r: PICKING_SENTINEL as f64,
                         g: 0.0,
                         b: 0.0,
                         a: 1.0,
