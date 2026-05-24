@@ -82,11 +82,11 @@ impl SelectionManager {
     /// updates [`primary`](Self::primary) to this entity. If the entity
     /// is already selected this is a no-op.
     pub fn select(&mut self, world: &mut World, entity: hecs::Entity) {
-        if self.selected.insert(entity) {
-            // `insert_one` silently succeeds or returns an error if the
-            // entity has been despawned — we ignore that because the
-            // HashSet entry is already added.
-            world.insert_one(entity, Selected).ok();
+        // Insert the component FIRST so we know the entity is alive.
+        // Only update our bookkeeping if the insertion succeeds — this
+        // prevents stale HashSet entries when the entity has been despawned.
+        if world.insert_one(entity, Selected).is_ok() {
+            self.selected.insert(entity);
             self.primary = Some(entity);
         }
     }
@@ -219,6 +219,26 @@ mod tests {
         assert!(has_selected_component(&world, entity));
         assert_eq!(mgr.primary, Some(entity));
         assert_eq!(selected_component_count(&world), 1);
+    }
+
+    #[test]
+    fn select_despawned_entity_does_not_add_to_set() {
+        let mut world = World::new();
+        let mut mgr = SelectionManager::new();
+        let entity = world.spawn(());
+
+        // Despawn the entity so it no longer exists in the ECS.
+        world.despawn(entity).unwrap();
+
+        // Attempting to select a despawned entity must not touch our state.
+        mgr.select(&mut world, entity);
+
+        assert!(mgr.is_empty());
+        assert_eq!(mgr.primary, None);
+        assert_eq!(selected_component_count(&world), 0);
+
+        // The invariant must hold: no entry in the set without a component.
+        assert_eq!(mgr.count(), selected_component_count(&world));
     }
 
     // -- deselect() --------------------------------------------------------
