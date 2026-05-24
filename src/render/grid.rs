@@ -345,7 +345,6 @@ impl GridRenderer {
 ///
 /// Does not panic.  If the viewport has zero width or height an empty
 /// `Vec` is returned.
-#[allow(unused_assignments)]
 fn generate_grid_vertices(camera: &CameraState, grid: &GridConfig) -> Vec<GridVertex> {
     if camera.viewport_size.0 == 0 || camera.viewport_size.1 == 0 {
         return Vec::new();
@@ -391,21 +390,28 @@ fn generate_grid_vertices(camera: &CameraState, grid: &GridConfig) -> Vec<GridVe
     // inline helper macro below.
     let mut vcount: u32 = 0;
 
-    // ── Helper macro: emit one line segment (two vertices) ───────────────
-    macro_rules! push_line {
-        ($x1:expr, $y1:expr, $x2:expr, $y2:expr, $col:expr) => {
-            if vcount < MAX_GRID_VERTICES {
-                vertices.push(GridVertex {
-                    position: [$x1 as f32, $y1 as f32],
-                    color: $col,
-                });
-                vertices.push(GridVertex {
-                    position: [$x2 as f32, $y2 as f32],
-                    color: $col,
-                });
-                vcount += 2;
-            }
-        };
+    // ── Helper: emit one line segment (two vertices) ─────────────────────
+    fn push_line(
+        vertices: &mut Vec<GridVertex>,
+        vcount: &mut u32,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        color: [f32; 4],
+    ) {
+        if *vcount >= MAX_GRID_VERTICES {
+            return;
+        }
+        vertices.push(GridVertex {
+            position: [x1 as f32, y1 as f32],
+            color,
+        });
+        vertices.push(GridVertex {
+            position: [x2 as f32, y2 as f32],
+            color,
+        });
+        *vcount += 2;
     }
 
     // ── Minor grid lines ────────────────────────────────────────────────
@@ -414,7 +420,7 @@ fn generate_grid_vertices(camera: &CameraState, grid: &GridConfig) -> Vec<GridVe
         let first_x = (ext_left / grid.minor_spacing).ceil() * grid.minor_spacing;
         let mut x = first_x;
         while x <= ext_right && vcount < MAX_GRID_VERTICES {
-            push_line!(x, ext_bottom, x, ext_top, minor_col);
+            push_line(&mut vertices, &mut vcount, x, ext_bottom, x, ext_top, minor_col);
             x += grid.minor_spacing;
         }
 
@@ -422,7 +428,7 @@ fn generate_grid_vertices(camera: &CameraState, grid: &GridConfig) -> Vec<GridVe
         let first_y = (ext_bottom / grid.minor_spacing).ceil() * grid.minor_spacing;
         let mut y = first_y;
         while y <= ext_top && vcount < MAX_GRID_VERTICES {
-            push_line!(ext_left, y, ext_right, y, minor_col);
+            push_line(&mut vertices, &mut vcount, ext_left, y, ext_right, y, minor_col);
             y += grid.minor_spacing;
         }
     }
@@ -433,7 +439,7 @@ fn generate_grid_vertices(camera: &CameraState, grid: &GridConfig) -> Vec<GridVe
         let first_x = (ext_left / grid.major_spacing).ceil() * grid.major_spacing;
         let mut x = first_x;
         while x <= ext_right && vcount < MAX_GRID_VERTICES {
-            push_line!(x, ext_bottom, x, ext_top, major_col);
+            push_line(&mut vertices, &mut vcount, x, ext_bottom, x, ext_top, major_col);
             x += grid.major_spacing;
         }
 
@@ -441,7 +447,7 @@ fn generate_grid_vertices(camera: &CameraState, grid: &GridConfig) -> Vec<GridVe
         let first_y = (ext_bottom / grid.major_spacing).ceil() * grid.major_spacing;
         let mut y = first_y;
         while y <= ext_top && vcount < MAX_GRID_VERTICES {
-            push_line!(ext_left, y, ext_right, y, major_col);
+            push_line(&mut vertices, &mut vcount, ext_left, y, ext_right, y, major_col);
             y += grid.major_spacing;
         }
     }
@@ -449,10 +455,10 @@ fn generate_grid_vertices(camera: &CameraState, grid: &GridConfig) -> Vec<GridVe
     // ── Axis lines (X = 0, Y = 0) ───────────────────────────────────────
     // Only draw an axis if it crosses the extended viewport bounds.
     if ext_bottom <= 0.0 && 0.0 <= ext_top && vcount < MAX_GRID_VERTICES {
-        push_line!(ext_left, 0.0, ext_right, 0.0, axis_col);
+        push_line(&mut vertices, &mut vcount, ext_left, 0.0, ext_right, 0.0, axis_col);
     }
     if ext_left <= 0.0 && 0.0 <= ext_right && vcount < MAX_GRID_VERTICES {
-        push_line!(0.0, ext_bottom, 0.0, ext_top, axis_col);
+        push_line(&mut vertices, &mut vcount, 0.0, ext_bottom, 0.0, ext_top, axis_col);
     }
 
     vertices
