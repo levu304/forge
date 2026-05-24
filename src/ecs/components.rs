@@ -18,7 +18,7 @@
 //! | `Selected` | Marker: entity is currently selected |
 //! | `SnapTarget` | Marker: entity can be snapped to |
 
-use crate::geometry::Point2D;
+use crate::geometry::{BoundingBox2D, Point2D};
 use crate::util::Color;
 
 /// Marker component indicating that an entity participates in rendering.
@@ -52,6 +52,22 @@ pub struct LineData {
     pub width: f32,
 }
 
+impl LineData {
+    /// Axis-aligned bounding box encompassing the line segment's endpoints.
+    pub fn bounding_box(&self) -> BoundingBox2D {
+        BoundingBox2D {
+            min: Point2D::new(
+                self.start.x.min(self.end.x),
+                self.start.y.min(self.end.y),
+            ),
+            max: Point2D::new(
+                self.start.x.max(self.end.x),
+                self.start.y.max(self.end.y),
+            ),
+        }
+    }
+}
+
 /// A circle defined by centre and radius.
 #[derive(Debug, Clone, Copy)]
 pub struct CircleData {
@@ -63,6 +79,16 @@ pub struct CircleData {
     pub color: Color,
     /// Outline width in screen-space pixels.
     pub width: f32,
+}
+
+impl CircleData {
+    /// Axis-aligned bounding box encompassing the full circle.
+    pub fn bounding_box(&self) -> BoundingBox2D {
+        BoundingBox2D {
+            min: Point2D::new(self.center.x - self.radius, self.center.y - self.radius),
+            max: Point2D::new(self.center.x + self.radius, self.center.y + self.radius),
+        }
+    }
 }
 
 /// An arc defined by centre, radius, and start/end angles.
@@ -88,6 +114,21 @@ pub struct ArcData {
     pub width: f32,
 }
 
+impl ArcData {
+    /// Axis-aligned bounding box encompassing the arc's full circle.
+    ///
+    /// This is a **conservative** estimate (same as the bounding box of the
+    /// arc's complete circle). A tighter bound could be computed by checking
+    /// which quadrant boundaries the arc sweeps through, but that is deferred
+    /// to a future optimisation.
+    pub fn bounding_box(&self) -> BoundingBox2D {
+        BoundingBox2D {
+            min: Point2D::new(self.center.x - self.radius, self.center.y - self.radius),
+            max: Point2D::new(self.center.x + self.radius, self.center.y + self.radius),
+        }
+    }
+}
+
 /// An ordered sequence of vertices forming a polyline or polygon.
 ///
 /// Derives `Clone` but not `Copy` because the vertex list is heap-allocated.
@@ -104,6 +145,40 @@ pub struct PolylineData {
     pub color: Color,
     /// Line width in screen-space pixels.
     pub width: f32,
+}
+
+impl PolylineData {
+    /// Axis-aligned bounding box covering all vertices.
+    ///
+    /// Returns a degenerate bounding box at the origin if there are no
+    /// vertices (defensive — an empty polyline should never exist in
+    /// normal operation).
+    pub fn bounding_box(&self) -> BoundingBox2D {
+        let mut iter = self.vertices.iter();
+        let first = match iter.next() {
+            Some(v) => *v,
+            None => {
+                return BoundingBox2D {
+                    min: Point2D::new(0.0, 0.0),
+                    max: Point2D::new(0.0, 0.0),
+                };
+            }
+        };
+        let mut min_x = first.x;
+        let mut max_x = first.x;
+        let mut min_y = first.y;
+        let mut max_y = first.y;
+        for v in iter {
+            min_x = min_x.min(v.x);
+            max_x = max_x.max(v.x);
+            min_y = min_y.min(v.y);
+            max_y = max_y.max(v.y);
+        }
+        BoundingBox2D {
+            min: Point2D::new(min_x, min_y),
+            max: Point2D::new(max_x, max_y),
+        }
+    }
 }
 
 /// Marker component: entity is currently selected.
