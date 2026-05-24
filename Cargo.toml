@@ -1,6 +1,6 @@
 [package]
 name = "forge"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Forge Contributors"]
 license = "MIT OR Apache-2.0"
@@ -12,6 +12,9 @@ winit = "0.30"
 wgpu = "29"
 hecs = "0.10"
 nalgebra = "0.34"
+
+# Spatial
+rstar = "0.12.2"
 
 # Parsing
 nom = "8"
