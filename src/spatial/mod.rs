@@ -109,13 +109,14 @@ impl SpatialIndex {
 
     /// Insert an entity with its bounding box into the index.
     ///
-    /// After insertion the index is considered **clean** — callers should
-    /// only use this for incremental updates when they know the inserted
-    /// entry represents the full current state.
+    /// This does **not** clear the dirty flag — callers that have marked
+    /// the index dirty (e.g. after a batch of entity modifications) must
+    /// use [`ensure_clean`] explicitly before the next query.
+    ///
+    /// [`ensure_clean`]: SpatialIndex::ensure_clean
     pub fn insert(&mut self, entity: hecs::Entity, bounds: BoundingBox2D) {
         self.bounds.insert(entity, bounds);
         self.tree.insert(SpatialEntry { entity, bounds });
-        self.dirty = false;
     }
 
     /// Remove an entity from the index.
