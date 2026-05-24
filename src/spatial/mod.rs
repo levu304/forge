@@ -136,6 +136,7 @@ impl SpatialIndex {
     ///
     /// Returns `None` if the index is empty.
     pub fn nearest_neighbor(&self, point: Point2D) -> Option<hecs::Entity> {
+        debug_assert!(!self.dirty, "query on dirty spatial index — call ensure_clean() first");
         self.tree
             .nearest_neighbor(&[point.x, point.y])
             .map(|entry| entry.entity)
@@ -146,6 +147,7 @@ impl SpatialIndex {
     /// Uses `rstar::RTree::locate_in_envelope` which returns entries fully
     /// contained within the query envelope.
     pub fn enclosed_in(&self, rect: &BoundingBox2D) -> Vec<hecs::Entity> {
+        debug_assert!(!self.dirty, "query on dirty spatial index — call ensure_clean() first");
         let envelope = AABB::from_corners(
             [rect.min.x, rect.min.y],
             [rect.max.x, rect.max.y],
@@ -161,6 +163,7 @@ impl SpatialIndex {
     /// Uses `rstar::RTree::locate_in_envelope_intersecting` which returns
     /// entries that overlap the query envelope (including partial overlaps).
     pub fn intersecting(&self, rect: &BoundingBox2D) -> Vec<hecs::Entity> {
+        debug_assert!(!self.dirty, "query on dirty spatial index — call ensure_clean() first");
         let envelope = AABB::from_corners(
             [rect.min.x, rect.min.y],
             [rect.max.x, rect.max.y],
