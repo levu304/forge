@@ -18,10 +18,10 @@ use std::collections::HashSet;
 /// and a [`Selected`] marker component on entities in the ECS world. Every
 /// `select()` inserts the component; every `deselect()` removes it.
 ///
-/// # Invariant
+/// # Invariant (private)
 ///
-/// `selected.len() == query::<&Selected>().count()` — the `HashSet` and the
-/// ECS marker component must always be in sync.
+/// The internal `HashSet` and the ECS marker component are always kept in sync:
+/// `selected.len() == query::<&Selected>().count()`.
 ///
 /// # Example
 ///
@@ -39,13 +39,13 @@ use std::collections::HashSet;
 /// ```
 pub struct SelectionManager {
     /// The set of currently selected entities (O(1) membership test).
-    pub selected: HashSet<hecs::Entity>,
+    selected: HashSet<hecs::Entity>,
     /// The most-recently-selected entity, used by the property panel.
     ///
     /// Updated on every `select()` call. When the primary entity is
     /// deselected, falls back to the first remaining selected entity
     /// (in arbitrary iteration order), or `None` if the selection is empty.
-    pub primary: Option<hecs::Entity>,
+    primary: Option<hecs::Entity>,
     /// Selection mode controlling how new selections interact with the
     /// current set.
     ///
