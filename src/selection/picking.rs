@@ -477,7 +477,7 @@ impl PickingPass {
     /// `render()` call).
     pub fn resolve_pick(&mut self, device: &wgpu::Device) -> Option<hecs::Entity> {
         if self.pending_result.is_none() {
-            return self.last_entity;
+            return None;
         }
 
         let slice = self.readback_buffer.slice(..);
@@ -713,7 +713,7 @@ impl PickingPass {
                 } else {
                     base_count
                 },
-                is_strip: false,
+                is_strip: true,
             });
         }
     }
@@ -877,7 +877,7 @@ mod tests {
 
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].vertex_count, 3);
-        assert!(!cmds[0].is_strip);
+        assert!(cmds[0].is_strip);
     }
 
     #[test]
