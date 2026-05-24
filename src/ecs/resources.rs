@@ -12,6 +12,8 @@
 //! | `CameraState` | Orthographic camera position, zoom, viewport size |
 //! | `GridConfig` | Grid visibility, spacing, and colors |
 //! | `InputState` | Mouse position, button states, keyboard modifiers |
+//! | `SnapConfig` | Snap engine configuration (enabled, marker size, aperture) |
+//! | `SelectionConfig` | Selection highlight configuration (alpha, enabled) |
 
 use crate::geometry::Point2D;
 use crate::util::Color;
@@ -183,6 +185,45 @@ pub struct InputState {
     pub ctrl: bool,
     /// Is Alt held?
     pub alt: bool,
+}
+
+/// Snap engine configuration.
+#[derive(Debug, Clone)]
+pub struct SnapConfig {
+    /// Master enable/disable switch for snapping.
+    pub enabled: bool,
+    /// Marker size in screen pixels.
+    pub marker_size: f32,
+    /// Cursor magnet radius in screen pixels.
+    pub aperture_size: f32,
+}
+
+impl Default for SnapConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            marker_size: 10.0,
+            aperture_size: 12.0,
+        }
+    }
+}
+
+/// Selection engine configuration.
+#[derive(Debug, Clone)]
+pub struct SelectionConfig {
+    /// Whether to highlight selected entities.
+    pub highlight_enabled: bool,
+    /// Highlight tint alpha (0.0–1.0).
+    pub highlight_alpha: f32,
+}
+
+impl Default for SelectionConfig {
+    fn default() -> Self {
+        Self {
+            highlight_enabled: true,
+            highlight_alpha: 0.3,
+        }
+    }
 }
 
 #[cfg(test)]

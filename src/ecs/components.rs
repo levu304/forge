@@ -15,6 +15,8 @@
 //! | `CircleData` | Circle with center, radius, color, width |
 //! | `ArcData` | Arc with center, radius, angles (degrees, CCW from +X) |
 //! | `PolylineData` | Ordered vertex sequence with optional closed flag |
+//! | `Selected` | Marker: entity is currently selected |
+//! | `SnapTarget` | Marker: entity can be snapped to |
 
 use crate::geometry::Point2D;
 use crate::util::Color;
@@ -103,3 +105,12 @@ pub struct PolylineData {
     /// Line width in screen-space pixels.
     pub width: f32,
 }
+
+/// Marker component: entity is currently selected.
+#[derive(Debug, Clone, Copy)]
+pub struct Selected;
+
+/// Marker component: entity can be snapped to.
+/// Reserved for v0.2.0 snap candidate filtering.
+#[derive(Debug, Clone, Copy)]
+pub struct SnapTarget;

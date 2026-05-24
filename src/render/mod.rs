@@ -10,6 +10,9 @@ pub use grid::GridRenderer;
 pub mod entity_renderer;
 pub mod shaders;
 pub mod pipeline; // reserved — v0.2.0+ cleanup
+pub mod picking_renderer;
+pub mod selection_renderer;
+pub mod window_select_renderer;
 
 use std::sync::Arc;
 
