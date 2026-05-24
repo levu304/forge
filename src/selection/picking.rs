@@ -31,6 +31,7 @@
 //! frame.
 
 use std::f64::consts::PI;
+use std::time::Duration;
 
 use bytemuck;
 use hecs::World;
@@ -482,19 +483,19 @@ impl PickingPass {
 
         let slice = self.readback_buffer.slice(..);
 
-        // Submit the map request and block until it completes.
-        // For v0.2.0 this synchronous approach is acceptable; a future
-        // optimisation could use a timeout or callback-based approach.
+        // Submit the map request and wait up to 16 ms for GPU completion.
+        // If the GPU is busy, we fall through and return None this frame;
+        // the caller can request the pick again next frame.
         let (sender, receiver) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
         });
         let _ = device.poll(wgpu::PollType::Wait {
             submission_index: None,
-            timeout: None,
+            timeout: Some(Duration::from_millis(16)),
         });
 
-        match receiver.recv() {
+        match receiver.try_recv() {
             Ok(Ok(())) => {
                 let data = slice.get_mapped_range();
                 let pixel_u32 =
@@ -513,9 +514,14 @@ impl PickingPass {
                     None
                 };
             }
-            Ok(Err(_)) | Err(_) => {
-                // Map submission or channel failure — clear the pending
-                // request and keep last_entity as-is.
+            Ok(Err(_)) => {
+                // Map submission failed — clear the pending request.
+                self.pending_result = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty | std::sync::mpsc::TryRecvError::Disconnected) => {
+                // GPU didn't finish within 16 ms or the channel was
+                // disconnected — clear the pending request and return
+                // None this frame. The caller can retry next frame.
                 self.pending_result = None;
             }
         }
