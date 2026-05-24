@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use winit::dpi::PhysicalSize;
 
+use crate::selection::picking::PickingPass;
 use crate::util::ForgeError;
 use self::entity_renderer::EntityVertex;
 
@@ -53,6 +54,12 @@ pub struct RenderState {
     pub egui_renderer: egui_wgpu::Renderer,
     /// The pixel format of the surface (e.g. `Bgra8Unorm`).
     pub surface_format: wgpu::TextureFormat,
+    /// GPU picking pass for entity ID framebuffer readback.
+    ///
+    /// Initialised as `None` in `RenderState::new()` — the caller (typically
+    /// `ForgeApp` in Step 15) must call `PickingPass::new()` and assign it
+    /// here once the GPU adapter/device supports the `Rgba32Uint` format.
+    pub picking_pass: Option<PickingPass>,
 }
 
 impl RenderState {
@@ -183,6 +190,7 @@ impl RenderState {
             entity_renderer,
             egui_renderer,
             surface_format,
+            picking_pass: None,
         })
     }
 
