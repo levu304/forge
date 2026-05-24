@@ -10,7 +10,7 @@
 //! | Resource | Description |
 //! |----------|-------------|
 //! | `CameraState` | Orthographic camera position, zoom, viewport size |
-//! | `GridConfig` | Grid visibility, spacing, and colours |
+//! | `GridConfig` | Grid visibility, spacing, and colors |
 //! | `InputState` | Mouse position, button states, keyboard modifiers |
 
 use crate::geometry::Point2D;
@@ -30,7 +30,7 @@ pub struct CameraState {
     pub zoom: f64,
     /// Viewport dimensions in physical (non-scaled) pixels.
     pub viewport_size: (u32, u32),
-    /// Background clear colour.
+    /// Background clear color.
     pub clear_color: Color,
 }
 
@@ -129,7 +129,7 @@ impl CameraState {
 /// Grid visualisation settings.
 ///
 /// Controls the background grid: visibility, major/minor line spacing,
-/// and per-line-type colours. The grid helps users orient themselves
+/// and per-line-type colors. The grid helps users orient themselves
 /// in the CAD viewport.
 #[derive(Debug, Clone)]
 pub struct GridConfig {

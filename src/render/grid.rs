@@ -26,7 +26,7 @@ const INITIAL_BUFFER_SIZE: u64 = 32768;
 
 // ─── Vertex ──────────────────────────────────────────────────────────────────
 
-/// A single grid vertex: 2 × f32 position + 4 × f32 colour = 24 bytes.
+/// A single grid vertex: 2 × f32 position + 4 × f32 color = 24 bytes.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct GridVertex {
@@ -73,7 +73,7 @@ impl GridRenderer {
     /// * `camera_bind_group_layout` — Bind-group layout for the camera
     ///   uniform at group(0), binding(0).  Shared with all other renderers.
     /// * `surface_format` — The swap-chain texture format (used as the
-    ///   fragment shader's colour target).
+    ///   fragment shader's color target).
     pub fn new(
         device: &wgpu::Device,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
@@ -182,7 +182,7 @@ impl GridRenderer {
     /// Render the grid into the active command encoder.
     ///
     /// This pass runs **after** the unconditional clear pass in
-    /// [`crate::app::ForgeApp::render`], so the colour attachment is
+    /// [`crate::app::ForgeApp::render`], so the color attachment is
     /// already cleared when this draw call begins.
     ///
     /// # Regeneration
@@ -200,7 +200,7 @@ impl GridRenderer {
     /// * `encoder` — Active command encoder for this frame.
     /// * `view` — Colour attachment texture view (from `Surface::get_current_texture`).
     /// * `camera` — Current camera state.
-    /// * `grid` — Grid configuration (spacing, colours, visibility).
+    /// * `grid` — Grid configuration (spacing, colors, visibility).
     /// * `camera_bind_group` — Bind group holding the camera uniform buffer.
     /// * `queue` — Command queue (used for `write_buffer` on regeneration).
     /// * `device` — GPU device (used to re-create the vertex buffer if it
@@ -331,7 +331,7 @@ impl GridRenderer {
 /// Generate grid vertices for the given camera view and grid configuration.
 ///
 /// Produces a flat `Vec<GridVertex>` encoding a `LineList` primitive with
-/// vertex colours for minor lines, major lines, and axis markers.
+/// vertex colors for minor lines, major lines, and axis markers.
 ///
 /// # Algorithm
 ///
@@ -365,7 +365,7 @@ fn generate_grid_vertices(camera: &CameraState, grid: &GridConfig) -> Vec<GridVe
     let ext_bottom = bottom - (top - bottom) * 0.1;
     let ext_top = top + (top - bottom) * 0.1;
 
-    // Pre-compute colour arrays for the three line categories.
+    // Pre-compute color arrays for the three line categories.
     let minor_col = [
         grid.minor_color.r,
         grid.minor_color.g,

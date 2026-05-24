@@ -5,7 +5,7 @@
 //!
 //! # Render-pass contract
 //!
-//! `render()` **does not** clear the colour attachment — it uses `LoadOp::Load`
+//! `render()` **does not** clear the color attachment — it uses `LoadOp::Load`
 //! because the grid renderer (which runs first) already cleared the framebuffer.
 //!
 //! # Batching strategy
@@ -60,7 +60,7 @@ fn circle_segments_for_radius(radius: f64, zoom: f64) -> u32 {
 
 // ─── Vertex ──────────────────────────────────────────────────────────────────
 
-/// A single entity vertex: 2 × f32 position + 4 × f32 colour = 24 bytes.
+/// A single entity vertex: 2 × f32 position + 4 × f32 color = 24 bytes.
 ///
 /// Layout matches `GridVertex` in `grid.rs` so shaders are interchangeable.
 #[repr(C)]
@@ -70,7 +70,7 @@ pub(super) struct EntityVertex {
     color: [f32; 4],
 }
 
-// ─── Helper: colour array ────────────────────────────────────────────────────
+// ─── Helper: color array ────────────────────────────────────────────────────
 
 /// Convert a `Color` value to an `[f32; 4]` array for vertex data.
 #[inline]

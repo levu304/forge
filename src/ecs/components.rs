@@ -44,7 +44,7 @@ pub struct LineData {
     pub start: Point2D,
     /// End point of the segment (world-space absolute coordinates).
     pub end: Point2D,
-    /// Line colour (RGBA).
+    /// Line color (RGBA).
     pub color: Color,
     /// Line width in screen-space pixels.
     pub width: f32,
@@ -57,7 +57,7 @@ pub struct CircleData {
     pub center: Point2D,
     /// Radius in world units.
     pub radius: f64,
-    /// Circle colour (RGBA).
+    /// Circle color (RGBA).
     pub color: Color,
     /// Outline width in screen-space pixels.
     pub width: f32,
@@ -80,7 +80,7 @@ pub struct ArcData {
     /// End angle in degrees. Must be > `start_angle` for a valid CCW arc.
     /// If equal to `start_angle`, the spawner should reject it as a zero-sweep arc.
     pub end_angle: f64,
-    /// Arc colour (RGBA).
+    /// Arc color (RGBA).
     pub color: Color,
     /// Outline width in screen-space pixels.
     pub width: f32,
@@ -98,7 +98,7 @@ pub struct PolylineData {
     pub vertices: Vec<Point2D>,
     /// If `true`, a closing segment from last vertex to first vertex is drawn.
     pub closed: bool,
-    /// Polyline colour (RGBA).
+    /// Polyline color (RGBA).
     pub color: Color,
     /// Line width in screen-space pixels.
     pub width: f32,
