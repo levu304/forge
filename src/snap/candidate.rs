@@ -13,7 +13,7 @@
 //!    [`crate::ecs::components`].
 
 use crate::ecs::components::{ArcData, CircleData, LineData, PolylineData};
-use crate::geometry::Point2D;
+use crate::geometry::{Point2D, GEOMETRIC_EPSILON};
 use crate::snap::SnapType;
 
 // ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ fn is_active(active_types: &[SnapType], target: SnapType) -> bool {
 fn project_onto_line(world_point: Point2D, a: Point2D, b: Point2D, clamped: bool) -> Option<Point2D> {
     let ab = b - a;
     let denom = ab.x * ab.x + ab.y * ab.y;
-    if denom < f64::EPSILON {
+    if denom < GEOMETRIC_EPSILON {
         return None; // degenerate segment
     }
     let t = ((world_point.x - a.x) * ab.x + (world_point.y - a.y) * ab.y) / denom;
@@ -97,7 +97,7 @@ fn project_onto_line(world_point: Point2D, a: Point2D, b: Point2D, clamped: bool
 impl SnapCandidate for LineData {
     fn generate_snap_points(&self, world_point: Point2D, active_types: &[SnapType]) -> Vec<SnapCandidatePoint> {
         let mut candidates = Vec::with_capacity(4);
-        let degenerate = self.start.distance(self.end) < f64::EPSILON;
+        let degenerate = self.start.distance(self.end) < GEOMETRIC_EPSILON;
 
         if degenerate {
             // Degenerate: single point acts as both Endpoint and Nearest.
@@ -151,7 +151,7 @@ impl SnapCandidate for CircleData {
         let mut candidates = Vec::with_capacity(4);
 
         // Zero-radius guard: only Center is meaningful.
-        if self.radius < f64::EPSILON {
+        if self.radius < GEOMETRIC_EPSILON {
             if is_active(active_types, SnapType::Center) {
                 candidates.push(SnapCandidatePoint::new(self.center, SnapType::Center, world_point));
             }
@@ -197,7 +197,7 @@ impl SnapCandidate for CircleData {
                 candidates.push(SnapCandidatePoint::new(t1, SnapType::Tangent, world_point));
                 // If the two tangents are distinct (cursor not exactly on circle),
                 // add both. If cursor is on the circle they coincide.
-                if (t1.x - t2.x).abs() > f64::EPSILON || (t1.y - t2.y).abs() > f64::EPSILON {
+                if (t1.x - t2.x).abs() > GEOMETRIC_EPSILON || (t1.y - t2.y).abs() > GEOMETRIC_EPSILON {
                     candidates.push(SnapCandidatePoint::new(t2, SnapType::Tangent, world_point));
                 }
             }
@@ -217,7 +217,7 @@ impl SnapCandidate for ArcData {
         let mut candidates = Vec::with_capacity(3);
 
         // Zero-radius guard.
-        if self.radius < f64::EPSILON {
+        if self.radius < GEOMETRIC_EPSILON {
             if is_active(active_types, SnapType::Center) {
                 candidates.push(SnapCandidatePoint::new(self.center, SnapType::Center, world_point));
             }
@@ -291,7 +291,7 @@ impl SnapCandidate for PolylineData {
         for i in 0..max_segments {
             let a = self.vertices[i];
             let b = self.vertices[(i + 1) % n];
-            let degenerate = a.distance(b) < f64::EPSILON;
+            let degenerate = a.distance(b) < GEOMETRIC_EPSILON;
 
             if degenerate {
                 // Degenerate segment: only output the shared endpoint once

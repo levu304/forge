@@ -1,5 +1,7 @@
 use std::ops::{Add, Mul, Sub};
 
+use super::GEOMETRIC_EPSILON;
+
 /// CAD-grade 2D point using f64 for precision.
 /// All world-space coordinates use this type.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -26,7 +28,7 @@ impl Point2D {
     /// Returns `(0, 0)` if the vector is zero-length (avoiding NaN).
     pub fn normalized(self) -> Point2D {
         let len = (self.x * self.x + self.y * self.y).sqrt();
-        if len < f64::EPSILON {
+        if len < GEOMETRIC_EPSILON {
             Point2D::new(0.0, 0.0)
         } else {
             Point2D::new(self.x / len, self.y / len)
