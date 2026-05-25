@@ -19,6 +19,7 @@ use std::sync::Arc;
 use winit::dpi::PhysicalSize;
 
 use crate::selection::picking::PickingPass;
+use crate::snap::visual::SnapMarkerRenderer;
 use crate::util::ForgeError;
 use self::entity_renderer::EntityVertex;
 
@@ -60,6 +61,16 @@ pub struct RenderState {
     /// `ForgeApp` in Step 15) must call `PickingPass::new()` and assign it
     /// here once the GPU adapter/device supports the `Rgba32Uint` format.
     pub picking_pass: Option<PickingPass>,
+
+    /// Snap marker renderer for visual snap feedback.
+    ///
+    /// Renders screen-space yellow markers at the snapped point. The marker
+    /// shape depends on the snap type (square for Endpoint, triangle for
+    /// Midpoint, circle for Center, crosshair for the rest).
+    ///
+    /// Initialised as `None` in `RenderState::new()` — the caller must
+    /// call `SnapMarkerRenderer::new()` and assign it here.
+    pub snap_marker_renderer: Option<SnapMarkerRenderer>,
 }
 
 impl RenderState {
@@ -191,6 +202,7 @@ impl RenderState {
             egui_renderer,
             surface_format,
             picking_pass: None,
+            snap_marker_renderer: None,
         })
     }
 
