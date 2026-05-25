@@ -28,8 +28,11 @@
 
 use hecs::World;
 
-use crate::ecs::resources::SnapConfig;
+use crate::ecs::components::{ArcData, CircleData, LineData, PolylineData};
+use crate::ecs::resources::{CameraState, SnapConfig};
 use crate::geometry::Point2D;
+use crate::snap::candidate::SnapCandidate;
+use crate::snap::filter::{filter_by_distance, rank_by_priority, screen_distance};
 use crate::spatial::SpatialIndex;
 
 pub mod candidate;
@@ -135,7 +138,11 @@ impl SnapEngine {
     ///    the raw cursor point immediately (avoids an R-tree rebuild).
     /// 2. Ensures the spatial index is clean (lazy rebuild).
     /// 3. Performs a nearest-neighbour query at `raw`.
-    /// 4. Returns a [`SnapResult`] describing the best snap point.
+    /// 4. Looks up the entity's geometry and generates snap candidates
+    ///    via [`SnapCandidate`].
+    /// 5. Filters candidates by screen-space aperture and ranks by
+    ///    snap-type priority.
+    /// 6. Returns a [`SnapResult`] describing the best snap point.
     ///
     /// If snapping is disabled, no active types are set, or no entity
     /// is found, the raw cursor point is returned as a fallback (with
@@ -144,13 +151,15 @@ impl SnapEngine {
     /// The result is also stored in [`last_result`] for the snap-marker
     /// renderer.
     ///
+    /// [`SnapCandidate`]: candidate::SnapCandidate
     /// [`last_result`]: SnapEngine::last_result
     pub fn snap(
         &mut self,
         raw: Point2D,
-        _screen_pos: (f32, f32),
+        screen_pos: (f32, f32),
         world: &World,
         spatial: &mut SpatialIndex,
+        camera: &CameraState,
     ) -> SnapResult {
         // 1. If snapping is disabled or no snap types are active,
         //    return the raw point immediately — avoids an R-tree rebuild.
@@ -169,18 +178,72 @@ impl SnapEngine {
         spatial.ensure_clean(world);
 
         // 3. Query the spatial index for the nearest entity.
-        let nearest = spatial.nearest_neighbor(raw);
-
-        // Full per-entity-type candidate generation is deferred to Step 7.
-        let result = SnapResult {
-            point: raw,
-            snap_type: SnapType::Nearest,
-            source_entity: nearest,
-            distance_screen: 0.0,
+        let Some(entity) = spatial.nearest_neighbor(raw) else {
+            let fallback = SnapResult {
+                point: raw,
+                snap_type: SnapType::Nearest,
+                source_entity: None,
+                distance_screen: 0.0,
+            };
+            self.last_result = Some(fallback);
+            return fallback;
         };
 
-        self.last_result = Some(result);
-        result
+        // 4. Generate snap candidates from the nearest entity's geometry.
+        let candidates: Vec<candidate::SnapCandidatePoint> = {
+            // Try each geometry type in order of likelihood.
+            if let Ok(line) = world.get::<&LineData>(entity) {
+                line.generate_snap_points(raw, &self.active_types)
+            } else if let Ok(circle) = world.get::<&CircleData>(entity) {
+                circle.generate_snap_points(raw, &self.active_types)
+            } else if let Ok(arc) = world.get::<&ArcData>(entity) {
+                arc.generate_snap_points(raw, &self.active_types)
+            } else if let Ok(polyline) = world.get::<&PolylineData>(entity) {
+                polyline.generate_snap_points(raw, &self.active_types)
+            } else {
+                // Entity has no recognised geometry — return raw point.
+                let fallback = SnapResult {
+                    point: raw,
+                    snap_type: SnapType::Nearest,
+                    source_entity: Some(entity),
+                    distance_screen: 0.0,
+                };
+                self.last_result = Some(fallback);
+                return fallback;
+            }
+        };
+
+        // 5. Filter candidates by screen-space distance, then rank by priority.
+        let candidates = filter_by_distance(
+            candidates,
+            screen_pos,
+            self.config.aperture_size,
+            camera,
+        );
+        let mut candidates = candidates;
+        rank_by_priority(&mut candidates, &self.config.priority_map);
+
+        // 6. Return the best candidate (first after ranking) or fall back
+        //    to the raw point.
+        if let Some(best) = candidates.into_iter().next() {
+            let result = SnapResult {
+                point: best.point,
+                snap_type: best.snap_type,
+                source_entity: Some(entity),
+                distance_screen: screen_distance(best.point, screen_pos, camera),
+            };
+            self.last_result = Some(result);
+            result
+        } else {
+            let fallback = SnapResult {
+                point: raw,
+                snap_type: SnapType::Nearest,
+                source_entity: Some(entity),
+                distance_screen: 0.0,
+            };
+            self.last_result = Some(fallback);
+            fallback
+        }
     }
 
     /// Look up the priority value for a snap type.
@@ -220,7 +283,20 @@ impl SnapEngine {
 mod tests {
     use super::*;
     use crate::ecs::components::{LineData, Renderable};
+    use crate::ecs::resources::CameraState;
     use crate::util::Color;
+
+    // ------------------------------------------------------------------
+    // Helper: test camera (zoom=1, 800×600 viewport)
+    // ------------------------------------------------------------------
+    fn test_camera() -> CameraState {
+        CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 1.0,
+            viewport_size: (800, 600),
+            clear_color: Color::BLACK,
+        }
+    }
 
     // ------------------------------------------------------------------
     // Helper: build a line entity in the world
@@ -343,9 +419,10 @@ mod tests {
         let mut engine = SnapEngine::new(SnapConfig::default());
         let mut world = World::new();
         let mut spatial = SpatialIndex::new();
+        let camera = test_camera();
 
         let raw = Point2D::new(42.0, 99.0);
-        let result = engine.snap(raw, (0.0, 0.0), &world, &mut spatial);
+        let result = engine.snap(raw, (0.0, 0.0), &world, &mut spatial, &camera);
 
         assert_eq!(
             result.point, raw,
@@ -376,9 +453,10 @@ mod tests {
         let mut engine = SnapEngine::new(SnapConfig::default());
         let mut world = World::new();
         let mut spatial = SpatialIndex::new();
+        let camera = test_camera();
 
         let raw = Point2D::new(10.0, 20.0);
-        engine.snap(raw, (0.0, 0.0), &world, &mut spatial);
+        engine.snap(raw, (0.0, 0.0), &world, &mut spatial, &camera);
 
         assert!(
             engine.last_result.is_some(),
@@ -398,11 +476,12 @@ mod tests {
         let mut engine = SnapEngine::new(SnapConfig::default());
         let mut world = World::new();
         let mut spatial = SpatialIndex::new();
+        let camera = test_camera();
 
         engine.set_active_types(vec![]);
 
         let raw = Point2D::new(5.0, 5.0);
-        let result = engine.snap(raw, (0.0, 0.0), &world, &mut spatial);
+        let result = engine.snap(raw, (0.0, 0.0), &world, &mut spatial, &camera);
 
         assert_eq!(
             result.point, raw,
@@ -422,9 +501,10 @@ mod tests {
         let mut engine = SnapEngine::new(config);
         let mut world = World::new();
         let mut spatial = SpatialIndex::new();
+        let camera = test_camera();
 
         let raw = Point2D::new(100.0, 200.0);
-        let result = engine.snap(raw, (0.0, 0.0), &world, &mut spatial);
+        let result = engine.snap(raw, (0.0, 0.0), &world, &mut spatial, &camera);
 
         assert_eq!(
             result.point, raw,
@@ -442,24 +522,35 @@ mod tests {
         let mut engine = SnapEngine::new(SnapConfig::default());
         let mut world = World::new();
         let mut spatial = SpatialIndex::new();
+        let camera = test_camera();
 
         // Spawn an entity at (0,0)–(10,10).
         let entity = make_line_entity(&mut world, 0.0, 0.0, 10.0, 10.0);
         spatial.rebuild(&world);
 
-        // Snap near the entity's bounding box centre (5,5).
+        // Snap near the entity. Cursor at (5,5) with aperture=12, zoom=1.
+        // The nearest point on the line is (5,5) itself, which is 0 pixels
+        // from cursor — within aperture. So the snap should succeed with
+        // source_entity = Some(entity).
         let raw = Point2D::new(5.0, 5.0);
-        let result = engine.snap(raw, (0.0, 0.0), &world, &mut spatial);
+        let result = engine.snap(raw, (400.0, 300.0), &world, &mut spatial, &camera);
 
-        assert_eq!(
-            result.snap_type,
-            SnapType::Nearest,
-            "Step 6 always returns Nearest",
-        );
         assert_eq!(
             result.source_entity,
             Some(entity),
             "should snap to the nearest entity",
+        );
+        // The best candidate should be an Endpoint or Nearest.
+        assert!(
+            matches!(result.snap_type, SnapType::Endpoint | SnapType::Nearest | SnapType::Midpoint),
+            "unexpected snap type {:?}",
+            result.snap_type,
+        );
+        // The snapped point should be on the line.
+        assert!(
+            (result.point.x - result.point.y).abs() < f64::EPSILON,
+            "snapped point should be on line y=x, got {:?}",
+            result.point,
         );
     }
 
@@ -468,6 +559,7 @@ mod tests {
         let mut engine = SnapEngine::new(SnapConfig::default());
         let mut world = World::new();
         let mut spatial = SpatialIndex::new();
+        let camera = test_camera();
 
         // Two entities: one near (0,0) and one at (100,100).
         let near_entity = make_line_entity(&mut world, 0.0, 0.0, 2.0, 2.0);
@@ -475,7 +567,7 @@ mod tests {
         spatial.rebuild(&world);
 
         // Snap at (1,1) should find the near entity.
-        let result = engine.snap(Point2D::new(1.0, 1.0), (0.0, 0.0), &world, &mut spatial);
+        let result = engine.snap(Point2D::new(1.0, 1.0), (400.0, 300.0), &world, &mut spatial, &camera);
         assert_eq!(result.source_entity, Some(near_entity));
     }
 

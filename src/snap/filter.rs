@@ -53,16 +53,26 @@ pub fn filter_by_distance(
         .collect()
 }
 
-/// Sort candidates in-place by snap-type priority (ascending).
+/// Sort candidates in-place by snap-type priority (ascending), with
+/// world-space distance as a tiebreaker for same-priority candidates.
 ///
 /// Lower priority values correspond to higher precedence (Endpoint = 0
 /// is the highest priority).  Types not present in `priority_map` are
-/// treated as `u8::MAX` (lowest priority).
+/// treated as `u8::MAX` (lowest priority).  Among candidates with the
+/// same priority, the closest (smallest `distance_world`) wins.
 pub fn rank_by_priority(
     candidates: &mut [SnapCandidatePoint],
     priority_map: &HashMap<SnapType, u8>,
 ) {
-    candidates.sort_by_key(|c| priority_map.get(&c.snap_type).copied().unwrap_or(u8::MAX));
+    candidates.sort_by(|a, b| {
+        let pa = priority_map.get(&a.snap_type).copied().unwrap_or(u8::MAX);
+        let pb = priority_map.get(&b.snap_type).copied().unwrap_or(u8::MAX);
+        pa.cmp(&pb).then_with(|| {
+            a.distance_world
+                .partial_cmp(&b.distance_world)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
 }
 
 #[cfg(test)]
@@ -198,21 +208,26 @@ mod tests {
     }
 
     #[test]
-    fn test_rank_by_priority_stable_for_equal_priority() {
+    fn test_rank_by_priority_distance_tiebreaker() {
         let mut priority_map = HashMap::new();
         priority_map.insert(SnapType::Endpoint, 0u8);
         priority_map.insert(SnapType::Midpoint, 0u8);
 
+        // Same priority (0), different distances.
+        // Endpoint at (1,0) is 1 unit away, Midpoint at (2,0) is 2 units away.
         let mut candidates = vec![
-            candidate(Point2D::new(2.0, 0.0), SnapType::Midpoint, 0.0),
-            candidate(Point2D::new(1.0, 0.0), SnapType::Endpoint, 0.0),
+            candidate(Point2D::new(2.0, 0.0), SnapType::Midpoint, 2.0),
+            candidate(Point2D::new(1.0, 0.0), SnapType::Endpoint, 1.0),
         ];
 
         rank_by_priority(&mut candidates, &priority_map);
 
-        // Both have same priority (0). sort_by_key is stable, so
-        // Midpoint (first in) stays before Endpoint.
-        assert_eq!(candidates[0].snap_type, SnapType::Midpoint);
-        assert_eq!(candidates[1].snap_type, SnapType::Endpoint);
+        // Same priority — closest should win.
+        assert_eq!(
+            candidates[0].snap_type,
+            SnapType::Endpoint,
+            "Endpoint is closer (1.0 < 2.0), should be ranked first",
+        );
+        assert_eq!(candidates[1].snap_type, SnapType::Midpoint);
     }
 }
