@@ -39,13 +39,13 @@ use std::collections::HashSet;
 /// ```
 pub struct SelectionManager {
     /// The set of currently selected entities (O(1) membership test).
-    selected: HashSet<hecs::Entity>,
+    pub(crate) selected: HashSet<hecs::Entity>,
     /// The most-recently-selected entity, used by the property panel.
     ///
     /// Updated on every `select()` call. When the primary entity is
     /// deselected, falls back to the first remaining selected entity
     /// (in arbitrary iteration order), or `None` if the selection is empty.
-    primary: Option<hecs::Entity>,
+    pub(crate) primary: Option<hecs::Entity>,
     /// Selection mode controlling how new selections interact with the
     /// current set.
     ///
