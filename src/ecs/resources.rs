@@ -15,7 +15,10 @@
 //! | `SnapConfig` | Snap engine configuration (enabled, marker size, aperture) |
 //! | `SelectionConfig` | Selection highlight configuration (alpha, enabled) |
 
+use std::collections::HashMap;
+
 use crate::geometry::Point2D;
+use crate::snap::SnapType;
 use crate::util::Color;
 
 /// Orthographic camera state.
@@ -196,6 +199,8 @@ pub struct SnapConfig {
     pub marker_size: f32,
     /// Cursor magnet radius in screen pixels.
     pub aperture_size: f32,
+    /// Per-type priority map (lower value = higher priority).
+    pub priority_map: HashMap<SnapType, u8>,
 }
 
 impl Default for SnapConfig {
@@ -204,6 +209,15 @@ impl Default for SnapConfig {
             enabled: true,
             marker_size: 10.0,
             aperture_size: 12.0,
+            priority_map: HashMap::from([
+                (SnapType::Endpoint, 0),
+                (SnapType::Midpoint, 1),
+                (SnapType::Center, 2),
+                (SnapType::Grid, 3),
+                (SnapType::Perpendicular, 4),
+                (SnapType::Tangent, 5),
+                (SnapType::Nearest, 6),
+            ]),
         }
     }
 }
