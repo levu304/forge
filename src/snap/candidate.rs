@@ -251,7 +251,13 @@ impl SnapCandidate for ArcData {
 
         // Midpoint (mid-angle of the arc sweep)
         if is_active(active_types, SnapType::Midpoint) {
-            let mid_angle_deg = (self.start_angle + self.end_angle) / 2.0;
+            // Handle arcs that wrap through 360° (end < start).
+            let end = if self.end_angle > self.start_angle {
+                self.end_angle
+            } else {
+                self.end_angle + 360.0
+            };
+            let mid_angle_deg = ((self.start_angle + end) / 2.0) % 360.0;
             candidates.push(SnapCandidatePoint::new(
                 angle_to_point(mid_angle_deg),
                 SnapType::Midpoint,
@@ -711,6 +717,32 @@ mod tests {
             let cands = all_candidates(&a, pt(0.0, 0.0));
             assert_eq!(cands.len(), 1, "zero-radius arc should return only center");
             assert_eq!(cands[0].snap_type, Center);
+        }
+
+        #[test]
+        fn midpoint_crossing_zero_degrees() {
+            // Arc from 350° to 10° (20° sweep crossing 0°).
+            // Midpoint should be 0° → (10, 0), NOT (−10, 0).
+            let a = arc(pt(0.0, 0.0), 10.0, 350.0, 10.0);
+            let cands = all_candidates(&a, pt(0.0, 0.0));
+            let mps = filter_type(&cands, Midpoint);
+            assert_eq!(mps.len(), 1);
+            assert!((mps[0].point.x - 10.0).abs() < 1e-9,
+                "midpoint should be at 0° (10, 0), got ({}, {})", mps[0].point.x, mps[0].point.y);
+            assert!((mps[0].point.y - 0.0).abs() < 1e-9);
+        }
+
+        #[test]
+        fn midpoint_crossing_via_360() {
+            // Arc from 270° to 90° (180° sweep crossing 0°).
+            // Midpoint should be 0° → (10, 0), NOT (180° → -10, 0).
+            let a = arc(pt(0.0, 0.0), 10.0, 270.0, 90.0);
+            let cands = all_candidates(&a, pt(0.0, 0.0));
+            let mps = filter_type(&cands, Midpoint);
+            assert_eq!(mps.len(), 1);
+            assert!((mps[0].point.x - 10.0).abs() < 1e-9,
+                "midpoint should be at 0° (10, 0), got ({}, {})", mps[0].point.x, mps[0].point.y);
+            assert!((mps[0].point.y - 0.0).abs() < 1e-9);
         }
     }
 
