@@ -131,9 +131,11 @@ impl SnapEngine {
 
     /// Run the snap pipeline.
     ///
-    /// 1. Ensures the spatial index is clean (lazy rebuild).
-    /// 2. Performs a nearest-neighbour query at `raw`.
-    /// 3. Returns a [`SnapResult`] describing the best snap point.
+    /// 1. If snapping is disabled or no snap types are active, returns
+    ///    the raw cursor point immediately (avoids an R-tree rebuild).
+    /// 2. Ensures the spatial index is clean (lazy rebuild).
+    /// 3. Performs a nearest-neighbour query at `raw`.
+    /// 4. Returns a [`SnapResult`] describing the best snap point.
     ///
     /// If snapping is disabled, no active types are set, or no entity
     /// is found, the raw cursor point is returned as a fallback (with
@@ -150,11 +152,8 @@ impl SnapEngine {
         world: &World,
         spatial: &mut SpatialIndex,
     ) -> SnapResult {
-        // 1. Ensure the spatial index is up-to-date.
-        spatial.ensure_clean(world);
-
-        // 2. If snapping is disabled or no snap types are active,
-        //    return the raw point immediately.
+        // 1. If snapping is disabled or no snap types are active,
+        //    return the raw point immediately — avoids an R-tree rebuild.
         if !self.config.enabled || self.active_types.is_empty() {
             let fallback = SnapResult {
                 point: raw,
@@ -165,6 +164,9 @@ impl SnapEngine {
             self.last_result = Some(fallback);
             return fallback;
         }
+
+        // 2. Ensure the spatial index is up-to-date.
+        spatial.ensure_clean(world);
 
         // 3. Query the spatial index for the nearest entity.
         let nearest = spatial.nearest_neighbor(raw);
