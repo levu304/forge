@@ -181,7 +181,10 @@ impl SnapCandidate for CircleData {
             let d = world_point.distance(self.center);
             if d >= self.radius {
                 // External or on the circle — two tangents exist.
-                let angle = (self.radius / d).acos();
+                // Clamp to [0, 1] to prevent NaN from IEEE 754 rounding
+                // when d is very slightly less than self.radius.
+                let cos_val = (self.radius / d).min(1.0);
+                let angle = cos_val.acos();
                 let base_angle = (world_point.y - self.center.y).atan2(world_point.x - self.center.x);
                 let t1 = Point2D::new(
                     self.center.x + (base_angle + angle).cos() * self.radius,
@@ -604,6 +607,26 @@ mod tests {
             let cands = all_candidates(&c, pt(5.0, 0.0));
             let tangents = filter_type(&cands, Tangent);
             assert_eq!(tangents.len(), 1, "cursor on circle generates 1 tangent (coincident)");
+            // Verify result has valid (non-NaN) coordinates.
+            assert!(tangents[0].point.x.is_finite(), "tangent point x should be finite");
+            assert!(tangents[0].point.y.is_finite(), "tangent point y should be finite");
+        }
+
+        #[test]
+        fn tangent_cursor_very_close_to_circumference() {
+            // Cursor at distance ≈ radius + tiny epsilon to trigger float rounding.
+            // Without the clamp in acos(), this would produce NaN.
+            let c = circle(pt(0.0, 0.0), 5.0);
+            let epsilon = 1e-16;
+            let cands = all_candidates(&c, pt(5.0 + epsilon, 0.0));
+            let tangents = filter_type(&cands, Tangent);
+            // Should produce valid tangents (no NaN from acos domain error).
+            for t in &tangents {
+                assert!(t.point.x.is_finite(), "tangent point x should be finite, got {}", t.point.x);
+                assert!(t.point.y.is_finite(), "tangent point y should be finite, got {}", t.point.y);
+                let dist = t.point.distance(pt(0.0, 0.0));
+                assert!((dist - 5.0).abs() < 1e-9, "tangent point must be on circumference");
+            }
         }
     }
 
