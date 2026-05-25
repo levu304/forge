@@ -48,7 +48,7 @@ pub mod visual;
 /// |---------------|----------|-----------------------------------|
 /// | `Endpoint`    | 0        | End of a line / arc / poly-segment |
 /// | `Midpoint`    | 1        | Middle of a segment               |
-/// | `Center`      | 2        | Centre of a circle / arc          |
+/// | `Center`      | 2        | Center of a circle / arc          |
 /// | `Grid`        | 3        | Nearest grid intersection         |
 /// | `Perpendicular` | 4      | Perpendicular projection          |
 /// | `Tangent`     | 5        | Tangent point on circle / arc     |
@@ -59,7 +59,7 @@ pub enum SnapType {
     Endpoint,
     /// Middle of a line / arc segment.
     Midpoint,
-    /// Centre of a circle / arc.
+    /// Center of a circle / arc.
     Center,
     /// Closest point on any entity.
     Nearest,
@@ -169,27 +169,12 @@ impl SnapEngine {
         // 3. Query the spatial index for the nearest entity.
         let nearest = spatial.nearest_neighbor(raw);
 
-        let result = match nearest {
-            Some(entity) => {
-                // Entity found — return a basic nearest snap result.
-                // Full per-entity-type candidate generation is deferred
-                // to Step 7.
-                SnapResult {
-                    point: raw,
-                    snap_type: SnapType::Nearest,
-                    source_entity: Some(entity),
-                    distance_screen: 0.0,
-                }
-            }
-            None => {
-                // No entity — raw point fallback.
-                SnapResult {
-                    point: raw,
-                    snap_type: SnapType::Nearest,
-                    source_entity: None,
-                    distance_screen: 0.0,
-                }
-            }
+        // Full per-entity-type candidate generation is deferred to Step 7.
+        let result = SnapResult {
+            point: raw,
+            snap_type: SnapType::Nearest,
+            source_entity: nearest,
+            distance_screen: 0.0,
         };
 
         self.last_result = Some(result);
@@ -397,7 +382,7 @@ mod tests {
             engine.last_result.is_some(),
             "last_result should be Some after snap()",
         );
-        let last = engine.last_result.unwrap();
+        let last = engine.last_result.expect("last_result should be Some after snap()");
         assert_eq!(last.point.x, 10.0);
         assert_eq!(last.point.y, 20.0);
     }
