@@ -657,8 +657,9 @@ mod tests {
         assert_eq!(history.undo_stack.len(), 2);
         assert_eq!(history.undo_label(), Some("tx3"));
 
-        // Undo tx3 → tx2 should be exposed
-        assert_eq!(history.undo_label(), Some("tx3")); // before undo
+        // After undo, tx2 becomes the top
+        history.undo(&mut World::new());
+        assert_eq!(history.undo_label(), Some("tx2"));
     }
 
     #[test]
@@ -861,26 +862,12 @@ mod tests {
         tx.push(AtomicOp::DespawnLine { entity, data });
         history.push(tx);
 
-        // Undo: re-spawns the entity (recorded in entity_map)
+        // Undo re-spawns the entity; redo uses the original DespawnLine op
+        // handle (stale after respawn), so `world.despawn` is a silent no-op.
+        // This is correct — callers apply EntityMapping to fix up handles
+        // when they care about the entity being truly gone.
         history.undo(&mut world);
         let _first_mapping = history.take_entity_mapping();
-
-        // Redo: despawns the entity (uses SpawnLine op? No... wait.
-        // Actually the redo descends from undo, which pushed DespawnLine.
-        // Redo of DespawnLine = despawn entity. The entity handle
-        // at this point is the remapped one from undo.
-        // Let's check: the undo re-spawned entity. The redo should despawn it.
-        // But the redo op references the original `entity` handle.
-        // After undo, the redo stack has the original DespawnLine op with
-        // the original `entity` handle. Since undo re-spawned and we
-        // took the mapping, the redo will try to despawn the old entity handle.
-        // The old entity handle doesn't exist anymore (it was despawned
-        // before the undo re-spawned it). So `world.despawn(*entity).ok()`
-        // will silently fail. This is correct behavior — the entity map
-        // would have been applied to fix up handles if we cared.
-
-        // For this test, just verify redo works without panics and
-        // returns the label.
         let label = history.redo(&mut world);
         assert_eq!(label.as_deref(), Some("despawn line"));
     }
