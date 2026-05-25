@@ -15,7 +15,10 @@
 //! | `SnapConfig` | Snap engine configuration (enabled, marker size, aperture) |
 //! | `SelectionConfig` | Selection highlight configuration (alpha, enabled) |
 
+use std::collections::HashMap;
+
 use crate::geometry::Point2D;
+use crate::snap::SnapType;
 use crate::util::Color;
 
 /// Orthographic camera state.
@@ -78,11 +81,14 @@ impl CameraState {
         let half_w = self.viewport_size.0 as f64 / 2.0;
         let half_h = self.viewport_size.1 as f64 / 2.0;
 
+        // Defensive clamp: prevent NaN/Inf if zoom is uninitialised.
+        let z = self.zoom.max(0.0001);
+
         let dx = world.x - self.target.x;
         let dy = world.y - self.target.y;
 
-        let sx = half_w + dx * self.zoom;
-        let sy = half_h - dy * self.zoom; // flip Y
+        let sx = half_w + dx * z;
+        let sy = half_h - dy * z; // flip Y
 
         (sx as f32, sy as f32)
     }
@@ -196,6 +202,8 @@ pub struct SnapConfig {
     pub marker_size: f32,
     /// Cursor magnet radius in screen pixels.
     pub aperture_size: f32,
+    /// Per-type priority map (lower value = higher priority).
+    pub priority_map: HashMap<SnapType, u8>,
 }
 
 impl Default for SnapConfig {
@@ -204,6 +212,15 @@ impl Default for SnapConfig {
             enabled: true,
             marker_size: 10.0,
             aperture_size: 12.0,
+            priority_map: HashMap::from([
+                (SnapType::Endpoint, 0),
+                (SnapType::Midpoint, 1),
+                (SnapType::Center, 2),
+                (SnapType::Grid, 3),
+                (SnapType::Perpendicular, 4),
+                (SnapType::Tangent, 5),
+                (SnapType::Nearest, 6),
+            ]),
         }
     }
 }
@@ -455,7 +472,44 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // 9. Y-axis flip: world Y+ maps to screen Y-
+    // 9. Zoom clamping: world_to_screen zoom=0 behaves like zoom=0.0001
+    // ------------------------------------------------------------------
+    #[test]
+    fn test_world_to_screen_zoom_clamping() {
+        let cam_zero = make_camera(50.0, 50.0, 0.0, 800, 600);
+        let cam_eps = make_camera(50.0, 50.0, 0.0001, 800, 600);
+
+        // Centre point should match
+        let s_zero = cam_zero.world_to_screen(Point2D::new(50.0, 50.0));
+        let s_eps = cam_eps.world_to_screen(Point2D::new(50.0, 50.0));
+        assert!(
+            (s_zero.0 - s_eps.0).abs() < f32::EPSILON,
+            "zoom=0 screen.x ({}) ≠ zoom=0.0001 screen.x ({})",
+            s_zero.0,
+            s_eps.0,
+        );
+        assert!(
+            (s_zero.1 - s_eps.1).abs() < f32::EPSILON,
+            "zoom=0 screen.y ({}) ≠ zoom=0.0001 screen.y ({})",
+            s_zero.1,
+            s_eps.1,
+        );
+
+        // Offset point to exercise the zoom path
+        let s_off_zero = cam_zero.world_to_screen(Point2D::new(100.0, 200.0));
+        let s_off_eps = cam_eps.world_to_screen(Point2D::new(100.0, 200.0));
+        assert!(
+            (s_off_zero.0 - s_off_eps.0).abs() < 0.001,
+            "zoom=0 offset screen.x mismatch",
+        );
+        assert!(
+            (s_off_zero.1 - s_off_eps.1).abs() < 0.001,
+            "zoom=0 offset screen.y mismatch",
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 10. Y-axis flip: world Y+ maps to screen Y-
     // ------------------------------------------------------------------
     #[test]
     fn test_world_to_screen_y_flip() {
