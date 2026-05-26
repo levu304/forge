@@ -153,7 +153,7 @@ impl ScaleCommand {
             let old = *data;
             let new = CircleData {
                 center: Self::scale_point(old.center, center, factor),
-                radius: old.radius * factor,
+                radius: old.radius * factor.abs(),
                 ..old
             };
             Some((AtomicOpValue::Circle(old), AtomicOpValue::Circle(new)))
@@ -161,7 +161,7 @@ impl ScaleCommand {
             let old = *data;
             let new = ArcData {
                 center: Self::scale_point(old.center, center, factor),
-                radius: old.radius * factor,
+                radius: old.radius * factor.abs(),
                 ..old
             };
             Some((AtomicOpValue::Arc(old), AtomicOpValue::Arc(new)))
@@ -225,10 +225,10 @@ impl Command for ScaleCommand {
                 }
 
                 let factor: f64 = match s.parse() {
-                    Ok(v) if v >= 0.0 => v,
+                    Ok(v) if v != 0.0 => v,
                     Ok(_) => {
                         return CommandResult::Error(
-                            "Scale factor must be non-negative.".to_string(),
+                            "Scale factor must be non-zero.".to_string(),
                         );
                     }
                     Err(_) => {
@@ -483,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn scale_negative_factor_returns_error() {
+    fn scale_negative_factor_mirrors_line() {
         let mut world = World::new();
         let e = make_line(&mut world, Point2D::new(0.0, 0.0), Point2D::new(10.0, 0.0));
 
@@ -493,7 +493,46 @@ mod tests {
         let mut cmd = ScaleCommand::new(&sel);
         let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
 
-        let result = cmd.on_input(CommandInput::Text("-1".to_string()), &mut world);
+        // factor = -1 → mirror across origin
+        let r = cmd.on_input(CommandInput::Text("-1".to_string()), &mut world);
+        assert!(matches!(r, CommandResult::Complete), "negative factor should succeed");
+
+        let line = world.get::<&LineData>(e).unwrap();
+        assert_eq!(line.start, Point2D::new(0.0, 0.0), "start at origin (unchanged)");
+        assert_eq!(line.end, Point2D::new(-10.0, 0.0), "end mirrored across origin");
+    }
+
+    #[test]
+    fn scale_negative_factor_keeps_circle_radius_positive() {
+        let mut world = World::new();
+        let e = make_circle(&mut world, Point2D::new(5.0, 0.0), 3.0);
+
+        let mut sel = SelectionManager::new();
+        sel.select(&mut world, e);
+
+        let mut cmd = ScaleCommand::new(&sel);
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+
+        let r = cmd.on_input(CommandInput::Text("-2".to_string()), &mut world);
+        assert!(matches!(r, CommandResult::Complete));
+
+        let circle = world.get::<&CircleData>(e).unwrap();
+        assert_eq!(circle.center, Point2D::new(-10.0, 0.0), "center mirrored");
+        assert_eq!(circle.radius, 6.0, "radius uses abs(factor)");
+    }
+
+    #[test]
+    fn scale_zero_factor_returns_error() {
+        let mut world = World::new();
+        let e = make_line(&mut world, Point2D::new(0.0, 0.0), Point2D::new(10.0, 0.0));
+
+        let mut sel = SelectionManager::new();
+        sel.select(&mut world, e);
+
+        let mut cmd = ScaleCommand::new(&sel);
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+
+        let result = cmd.on_input(CommandInput::Text("0".to_string()), &mut world);
         assert!(matches!(result, CommandResult::Error(_)));
     }
 
