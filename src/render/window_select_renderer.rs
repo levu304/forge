@@ -58,6 +58,8 @@ pub struct WindowSelectRenderer {
     fill_pipeline: wgpu::RenderPipeline,
     /// Render pipeline for the border (LineStrip, alpha 0.8).
     border_pipeline: wgpu::RenderPipeline,
+    /// Persistent staging buffer reused every frame (264 bytes).
+    staging_buffer: wgpu::Buffer,
 }
 
 impl WindowSelectRenderer {
@@ -169,6 +171,12 @@ impl WindowSelectRenderer {
         Self {
             fill_pipeline,
             border_pipeline,
+            staging_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Window Select Staging Buffer"),
+                size: 264, // 11 vertices × 24 bytes
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
         }
     }
 
@@ -183,15 +191,15 @@ impl WindowSelectRenderer {
     /// * `view` — Colour attachment texture view.
     /// * `window_select` — The current window-select drag state.
     /// * `camera_bind_group` — Bind group for the shared camera uniform.
-    /// * `queue` — Command queue (used for `write_buffer` on the temporary
-    ///   vertex buffer).
+    /// * `queue` — Command queue (used for `write_buffer` on the persistent
+    ///   staging buffer).
     ///
     /// # Vertex buffer strategy
     ///
-    /// We upload a small vertex buffer (6 fill + 5 border = 11 vertices)
-    /// every frame via `queue.write_buffer` using a small persistent staging
-    /// buffer.  This is negligible overhead for a rectangle drawn only
-    /// during mouse-drag.
+    /// We upload vertex data (11 vertices = 264 bytes) every frame via
+    /// `queue.write_buffer` into a persistent staging buffer allocated once
+    /// in [`Self::new`].  This avoids per-frame GPU allocation while the
+    /// window-select rectangle is being dragged.
     pub fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -199,7 +207,6 @@ impl WindowSelectRenderer {
         window_select: &WindowSelectState,
         camera_bind_group: &wgpu::BindGroup,
         queue: &wgpu::Queue,
-        device: &wgpu::Device,
     ) {
         // ── 1. Skip zero-area rects ──────────────────────────────────────
         if window_select.start == window_select.current {
@@ -247,23 +254,15 @@ impl WindowSelectRenderer {
             WindowSelectVertex { position: bl, color: border_col },
         ];
 
-        // ── 5. Upload to a staging buffer via queue.write_buffer ─────────
+        // ── 5. Upload to the persistent staging buffer ────────────────────
         // 11 vertices × 24 bytes = 264 bytes — small, uploaded every frame.
         let fill_bytes: &[u8] = bytemuck::cast_slice(&fill_verts);
         let border_bytes: &[u8] = bytemuck::cast_slice(&border_verts);
 
         let fill_size = fill_bytes.len() as u64;
-        let border_size = border_bytes.len() as u64;
-        let total_size = fill_size + border_size;
 
-        let staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Window Select Staging Buffer"),
-            size: total_size,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        queue.write_buffer(&staging, 0, fill_bytes);
-        queue.write_buffer(&staging, fill_size, border_bytes);
+        queue.write_buffer(&self.staging_buffer, 0, fill_bytes);
+        queue.write_buffer(&self.staging_buffer, fill_size, border_bytes);
 
         // ── 6. Begin render pass (LoadOp::Load — draw on top of grid) ───
         let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -285,13 +284,13 @@ impl WindowSelectRenderer {
 
         // ── 7. Draw fill (first 6 vertices) ──────────────────────────────
         rp.set_pipeline(&self.fill_pipeline);
-        rp.set_vertex_buffer(0, staging.slice(..fill_size));
+        rp.set_vertex_buffer(0, self.staging_buffer.slice(..fill_size));
         rp.set_bind_group(0, camera_bind_group, &[]);
         rp.draw(0..6, 0..1);
 
         // ── 8. Draw border (next 5 vertices) ─────────────────────────────
         rp.set_pipeline(&self.border_pipeline);
-        rp.set_vertex_buffer(0, staging.slice(fill_size..));
+        rp.set_vertex_buffer(0, self.staging_buffer.slice(fill_size..));
         rp.draw(0..5, 0..1);
     }
 }
