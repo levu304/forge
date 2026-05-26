@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use winit::dpi::PhysicalSize;
 
+use crate::render::window_select_renderer::WindowSelectRenderer;
 use crate::selection::picking::PickingPass;
 use crate::snap::visual::SnapMarkerRenderer;
 use crate::util::ForgeError;
@@ -68,9 +69,15 @@ pub struct RenderState {
     /// shape depends on the snap type (square for Endpoint, triangle for
     /// Midpoint, circle for Center, crosshair for the rest).
     ///
-    /// Initialised as `None` in `RenderState::new()` — the caller must
-    /// call `SnapMarkerRenderer::new()` and assign it here.
+    /// Initialised during `RenderState::new()`.
     pub snap_marker_renderer: Option<SnapMarkerRenderer>,
+
+    /// Renders the translucent window-selection rectangle during drag.
+    ///
+    /// Blue for enclosing mode, green for crossing mode.
+    ///
+    /// Initialised during `RenderState::new()`.
+    pub window_select_renderer: WindowSelectRenderer,
 }
 
 impl RenderState {
@@ -184,9 +191,19 @@ impl RenderState {
         // -- Grid renderer -------------------------------------------------------
         let grid_renderer = GridRenderer::new(&device, &camera_bind_group_layout, surface_format);
 
-        // -- Entity renderer (stub) --------------------------------------------
+        // -- Entity renderer ----------------------------------------------------
         let entity_renderer =
             EntityRenderer::new(&device, &camera_bind_group_layout, surface_format);
+
+        // -- Window select renderer ---------------------------------------------
+        let window_select_renderer =
+            WindowSelectRenderer::new(&device, &camera_bind_group_layout, surface_format);
+
+        // -- GPU picking pass ---------------------------------------------------
+        let picking = PickingPass::new(&device, &camera_bind_group_layout, (size.width, size.height));
+
+        // -- Snap marker renderer -----------------------------------------------
+        let snap = SnapMarkerRenderer::new(&device, &camera_bind_group_layout, surface_format);
 
         Ok(Self {
             instance,
@@ -201,8 +218,9 @@ impl RenderState {
             entity_renderer,
             egui_renderer,
             surface_format,
-            picking_pass: None,
-            snap_marker_renderer: None,
+            picking_pass: Some(picking),
+            snap_marker_renderer: Some(snap),
+            window_select_renderer,
         })
     }
 
@@ -215,6 +233,16 @@ impl RenderState {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+        }
+    }
+
+    /// Resize the picking pass offscreen texture to match the new viewport.
+    ///
+    /// Must be called after `resize()` so the picking framebuffer stays in
+    /// sync with the window dimensions.
+    pub fn resize_picking(&mut self, new_size: PhysicalSize<u32>) {
+        if let Some(ref mut p) = self.picking_pass {
+            p.resize(&self.device, (new_size.width, new_size.height));
         }
     }
 }
@@ -263,6 +291,6 @@ pub struct EntityRenderer {
 }
 
 impl EntityRenderer {
-    /// Initial staging buffer size in bytes (~1365 vertices at 24 bytes each).
+    /// Initial staging buffer size in bytes (~1170 vertices at 28 bytes each).
     const INITIAL_STAGING_SIZE: u64 = 32768;
 }
