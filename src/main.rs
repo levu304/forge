@@ -1,4 +1,4 @@
-//! Forge v0.1.0 — Entry point and winit event loop.
+//! Forge v0.2.0 — Entry point and winit event loop.
 //!
 //! Initialises structured logging, creates the window and `ForgeApp`,
 //! then runs the winit [`ApplicationHandler`] event loop.
@@ -30,6 +30,7 @@ use winit::{
 use forge::app::ForgeApp;
 use forge::commands::{CommandInput, CommandResult};
 use forge::input::{apply_camera_action, InputAction};
+use forge::selection::window_select::{WindowSelectMode, WindowSelectState};
 
 // ─── ForgeState ──────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ impl ApplicationHandler for ForgeAppHandler {
         }
 
         let window_attributes = winit::window::WindowAttributes::default()
-            .with_title("Forge v0.1.0")
+            .with_title("Forge v0.2.0")
             .with_inner_size(LogicalSize::new(1280, 720));
 
         let window = match event_loop.create_window(window_attributes) {
@@ -94,7 +95,7 @@ impl ApplicationHandler for ForgeAppHandler {
         if let Some(state) = &self.state {
             state.window.request_redraw();
         }
-        tracing::info!("Forge v0.1.0 ready");
+        tracing::info!("Forge v0.2.0 ready");
     }
 
     // ── window_event ──────────────────────────────────────────────────────
@@ -174,7 +175,13 @@ impl ApplicationHandler for ForgeAppHandler {
         let actions = state
             .app
             .input_mapper
-            .handle_event(&event, &state.app.resources.camera);
+            .handle_event(
+                &event,
+                &state.app.resources.camera,
+                &mut state.app.snap_engine,
+                &state.app.world,
+                &mut state.app.spatial_index,
+            );
 
         for action in actions {
             match action {
@@ -197,6 +204,47 @@ impl ApplicationHandler for ForgeAppHandler {
                             }
                             _ => {}
                         }
+                    } else {
+                        // No active command — start window selection drag
+                        let screen = state.app.input_mapper.state.mouse_screen;
+                        let start_screen = (screen.0 as f64, screen.1 as f64);
+                        state.app.window_select_state = Some(WindowSelectState::new(
+                            point,
+                            point,
+                            WindowSelectMode::Enclosing,
+                            start_screen,
+                            start_screen,
+                        ));
+                    }
+                }
+                InputAction::LeftRelease(point) => {
+                    if let Some(ws) = state.app.window_select_state.take() {
+                        let screen = state.app.input_mapper.state.mouse_screen;
+                        let current_screen = (screen.0 as f64, screen.1 as f64);
+                        let mode = WindowSelectState::mode_from_drag(
+                            ws.start_screen,
+                            current_screen,
+                        );
+                        let ws = WindowSelectState::new(
+                            ws.start,
+                            point,
+                            mode,
+                            ws.start_screen,
+                            current_screen,
+                        );
+                        let entities = ws.query(&state.app.spatial_index);
+                        state.app.selection_manager.clear(&mut state.app.world);
+                        for entity in entities {
+                            state
+                                .app
+                                .selection_manager
+                                .select(&mut state.app.world, entity);
+                        }
+                        tracing::info!(
+                            "Window select: {} entities ({:?})",
+                            state.app.selection_manager.count(),
+                            mode,
+                        );
                     }
                 }
                 InputAction::Pan(_, _) | InputAction::Zoom(_, _) => {
@@ -207,13 +255,22 @@ impl ApplicationHandler for ForgeAppHandler {
                         cmd.on_cancel(&mut state.app.world);
                     }
                     state.app.command_state.active = None;
+                    state.app.window_select_state = None;
                 }
                 InputAction::CommandText(ref text) => {
                     state.app.dispatch_command_text(text);
                 }
                 InputAction::MouseMoved(_) => {
+                    // Update window select drag if active
+                    if let Some(ref mut ws) = state.app.window_select_state {
+                        ws.current = state.app.input_mapper.state.mouse_world;
+                        let screen = state.app.input_mapper.state.mouse_screen;
+                        ws.current_screen = (screen.0 as f64, screen.1 as f64);
+                    }
                     // Request redraw so active command previews update.
-                    if state.app.command_state.active.is_some() {
+                    if state.app.command_state.active.is_some()
+                        || state.app.window_select_state.is_some()
+                    {
                         state.window.request_redraw();
                     }
                 }

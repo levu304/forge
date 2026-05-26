@@ -1,8 +1,11 @@
 //! Status bar — bottom edge of the viewport.
 //!
-//! Displays cursor coordinates, zoom level, and version info.
+//! Displays cursor coordinates, zoom level, snap mode indicators,
+//! selection count, and version info.
 
 use crate::ecs::resources::{CameraState, InputState};
+use crate::selection::SelectionManager;
+use crate::snap::SnapEngine;
 
 // ---------------------------------------------------------------------------
 // Pure helper functions (unit-testable without egui)
@@ -31,8 +34,16 @@ pub fn format_zoom(zoom: f64) -> String {
 /// Shows:
 /// * Mouse world-space X and Y coordinates (4 decimal places).
 /// * Current zoom level as a percentage.
-/// * "Forge v0.1.0" right-aligned.
-pub fn draw(ui: &mut egui::Ui, camera: &CameraState, input: &InputState) {
+/// * Active snap type indicators (yellow labels).
+/// * Current selection count.
+/// * "Forge v0.2.0" right-aligned.
+pub fn draw(
+    ui: &mut egui::Ui,
+    camera: &CameraState,
+    input: &InputState,
+    snap: &SnapEngine,
+    selection: &SelectionManager,
+) {
     egui::Panel::bottom("status_bar")
         .exact_size(28.0)
         .show_inside(ui, |ui| {
@@ -41,8 +52,24 @@ pub fn draw(ui: &mut egui::Ui, camera: &CameraState, input: &InputState) {
                 ui.label(format!("Y: {}", format_coord(input.mouse_world.y)));
                 ui.separator();
                 ui.label(format!("Zoom: {}", format_zoom(camera.zoom)));
+
+                // Snap type indicators
+                if snap.config.enabled && !snap.active_types.is_empty() {
+                    ui.separator();
+                    for snap_type in &snap.active_types {
+                        ui.colored_label(
+                            egui::Color32::YELLOW,
+                            format!("{:?}", snap_type),
+                        );
+                    }
+                }
+
+                // Selection count
+                ui.separator();
+                ui.label(format!("Selected: {}", selection.count()));
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label("Forge v0.1.0");
+                    ui.label("Forge v0.2.0");
                 });
             });
         });

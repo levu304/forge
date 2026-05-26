@@ -6,6 +6,8 @@
 
 use crate::ecs::resources::{CameraState, InputState};
 use crate::geometry::Point2D;
+use crate::snap::SnapEngine;
+use crate::spatial::SpatialIndex;
 
 pub mod camera_control;
 pub use camera_control::apply_camera_action;
@@ -21,6 +23,8 @@ pub enum InputAction {
     MouseMoved(Point2D),
     /// Left mouse button clicked at a world-space position.
     Click(Point2D),
+    /// Left mouse button released at a world-space position.
+    LeftRelease(Point2D),
     /// Middle-drag pan: delta in screen pixels (dx, dy).
     Pan(f64, f64),
     /// Scroll-wheel zoom: delta amount and world-space pivot point.
@@ -100,6 +104,9 @@ impl InputMapper {
         &mut self,
         event: &winit::event::WindowEvent,
         camera: &CameraState,
+        snap_engine: &mut SnapEngine,
+        world: &hecs::World,
+        spatial: &mut SpatialIndex,
     ) -> Vec<InputAction> {
         use winit::{
             event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
@@ -115,6 +122,15 @@ impl InputMapper {
                 let sy = position.y.clamp(0.0, 65536.0) as f32;
                 self.state.mouse_screen = (sx, sy);
                 self.state.mouse_world = camera.screen_to_world(self.state.mouse_screen);
+                // Apply snapping to the raw world position.
+                let snapped = snap_engine.snap(
+                    self.state.mouse_world,
+                    self.state.mouse_screen,
+                    world,
+                    spatial,
+                    camera,
+                );
+                self.state.mouse_world = snapped.point;
                 actions.push(InputAction::MouseMoved(self.state.mouse_world));
             }
 
@@ -128,7 +144,16 @@ impl InputMapper {
                     MouseButton::Left => {
                         self.state.left_down = true;
                         let click_world = camera.screen_to_world(self.state.mouse_screen);
-                        actions.push(InputAction::Click(click_world));
+                        // Apply snapping to the click point.
+                        let snapped = snap_engine.snap(
+                            click_world,
+                            self.state.mouse_screen,
+                            world,
+                            spatial,
+                            camera,
+                        );
+                        self.state.mouse_world = snapped.point;
+                        actions.push(InputAction::Click(snapped.point));
                     }
                     MouseButton::Middle => {
                         self.state.middle_down = true;
@@ -142,7 +167,10 @@ impl InputMapper {
                     _ => {}
                 },
                 ElementState::Released => match button {
-                    MouseButton::Left => self.state.left_down = false,
+                    MouseButton::Left => {
+                        self.state.left_down = false;
+                        actions.push(InputAction::LeftRelease(self.state.mouse_world));
+                    }
                     MouseButton::Middle => self.state.middle_down = false,
                     MouseButton::Right => self.state.right_down = false,
                     _ => {}
@@ -261,6 +289,14 @@ mod tests {
         }
     }
 
+    /// Helper: create a test snap engine with snapping disabled so it
+    /// doesn't interfere with input tests.
+    fn test_snap_engine_disabled() -> SnapEngine {
+        let mut config = crate::ecs::resources::SnapConfig::default();
+        config.enabled = false;
+        SnapEngine::new(config)
+    }
+
     /// `LineDelta` with positive Y produces a **positive** `Zoom` delta.
     #[test]
     fn line_delta_positive_y_zooms_in() {
@@ -271,9 +307,12 @@ mod tests {
             viewport_size: (1000, 1000),
             clear_color: crate::util::Color::BLACK,
         };
+        let mut snap_engine = test_snap_engine_disabled();
+        let world = hecs::World::new();
+        let mut spatial = SpatialIndex::new();
 
         let event = make_wheel_event(MouseScrollDelta::LineDelta(0.0, 1.0));
-        let actions = mapper.handle_event(&event, &camera);
+        let actions = mapper.handle_event(&event, &camera, &mut snap_engine, &world, &mut spatial);
 
         let zoom_action = actions.iter().find_map(|a| {
             if let InputAction::Zoom(dy, _) = a { Some(*dy) } else { None }
@@ -333,11 +372,14 @@ mod tests {
             viewport_size: (1000, 1000),
             clear_color: crate::util::Color::BLACK,
         };
+        let mut snap_engine = test_snap_engine_disabled();
+        let world = hecs::World::new();
+        let mut spatial = SpatialIndex::new();
 
         let event = make_wheel_event(MouseScrollDelta::PixelDelta(
             PhysicalPosition::new(0.0, 100.0),
         ));
-        let actions = mapper.handle_event(&event, &camera);
+        let actions = mapper.handle_event(&event, &camera, &mut snap_engine, &world, &mut spatial);
 
         let zoom_action = actions.iter().find_map(|a| {
             if let InputAction::Zoom(dy, _) = a { Some(*dy) } else { None }
