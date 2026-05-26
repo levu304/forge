@@ -10,7 +10,8 @@
 //! - **Lines**: parallel offset at perpendicular distance
 //! - **Circles**: concentric offset (radius ± distance)
 //!
-//! Arcs and polylines are silently skipped.
+//! Arcs and polylines are unsupported in v0.2.0. If all selected
+//! entities are unsupported, the command returns an error.
 //!
 //! Builds a [`Transaction`] with `Spawn*` ops for the history system.
 
@@ -82,14 +83,10 @@ impl OffsetCommand {
     /// Uses a two-phase approach to avoid borrow conflicts:
     /// 1. Read all entity data (immutable borrow of `world`), compute new data.
     /// 2. Spawn new entities (mutable borrow of `world`).
-    fn apply_offset(&mut self, world: &mut World, dist: f64, side_point: Point2D) -> Transaction {
-        let count = self.selected_entities.len();
-        let mut tx = Transaction::new(format!(
-            "Offset {} entit{}",
-            count,
-            if count == 1 { "y" } else { "ies" },
-        ));
-
+    ///
+    /// Returns `None` when no entities could be offset (all selected entities
+    /// are unsupported types like arcs or polylines in v0.2.0).
+    fn apply_offset(&mut self, world: &mut World, dist: f64, side_point: Point2D) -> Option<Transaction> {
         // Phase 1: read and compute (immutable borrow).
         let new_entities: Vec<AtomicOpValue> = self
             .selected_entities
@@ -98,6 +95,17 @@ impl OffsetCommand {
                 Self::compute_offset_data(world, entity, dist, side_point)
             })
             .collect();
+
+        if new_entities.is_empty() {
+            return None;
+        }
+
+        let count = new_entities.len();
+        let mut tx = Transaction::new(format!(
+            "Offset {} entit{}",
+            count,
+            if count == 1 { "y" } else { "ies" },
+        ));
 
         // Phase 2: spawn (mutable borrow).
         for new_data in new_entities {
@@ -137,7 +145,7 @@ impl OffsetCommand {
             }
         }
 
-        tx
+        Some(tx)
     }
 
     /// Read-only helper: compute the offset data for a single entity.
@@ -281,9 +289,15 @@ impl Command for OffsetCommand {
                     }
                 };
 
-                self.pending_transaction =
-                    Some(self.apply_offset(world, dist, p));
-                CommandResult::Complete
+                match self.apply_offset(world, dist, p) {
+                    Some(tx) => {
+                        self.pending_transaction = Some(tx);
+                        CommandResult::Complete
+                    }
+                    None => CommandResult::Error(
+                        "No supported entities for OFFSET. Only lines and circles are supported in v0.2.0.".to_string(),
+                    ),
+                }
             }
             CommandInput::Confirm => {
                 if self.distance.is_none() {
@@ -495,10 +509,10 @@ mod tests {
         let mut cmd = OffsetCommand::new(&sel);
         let _ = cmd.on_input(CommandInput::Text("10".to_string()), &mut world);
         // Click inside → would make radius -5, which is skipped
-        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+        let result = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
 
-        let spawned = cmd.take_spawned_entities();
-        assert_eq!(spawned.len(), 0, "inner offset producing negative radius is skipped");
+        assert!(matches!(result, CommandResult::Error(_)), "should error when no entities can be offset");
+        assert!(cmd.take_transaction().is_none(), "no transaction created");
     }
 
     // -- mixed selection ---------------------------------------------------
@@ -532,6 +546,37 @@ mod tests {
         let mut cmd = OffsetCommand::new(&sel);
         let result = cmd.on_input(CommandInput::Text("10".to_string()), &mut world);
         assert!(matches!(result, CommandResult::Error(_)));
+    }
+
+    // -- unsupported entity types ------------------------------------------
+
+    #[test]
+    fn offset_unsupported_entities_returns_error() {
+        let mut world = World::new();
+
+        // Arc (unsupported in v0.2.0)
+        let e = world.spawn((
+            ArcData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 5.0,
+                start_angle: 0.0,
+                end_angle: 90.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let mut sel = SelectionManager::new();
+        sel.select(&mut world, e);
+
+        let mut cmd = OffsetCommand::new(&sel);
+        let _ = cmd.on_input(CommandInput::Text("5".to_string()), &mut world);
+
+        let result = cmd.on_input(CommandInput::Point(Point2D::new(1.0, 0.0)), &mut world);
+        assert!(matches!(result, CommandResult::Error(_)), "should error when all entities unsupported");
+        assert!(cmd.take_transaction().is_none(), "no transaction created");
+        assert!(cmd.take_spawned_entities().is_empty(), "no entities spawned");
     }
 
     // -- invalid text ------------------------------------------------------
