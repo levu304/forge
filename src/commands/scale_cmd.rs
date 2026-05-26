@@ -3,10 +3,12 @@
 //! Scales selected entities around a base point by a scale factor.
 //! Two-step interaction:
 //! 1. User picks a base point (center of scaling).
-//! 2. User provides a scale factor (via text input, or a second point
-//!    to derive the factor from the distance ratio).
+//! 2. User enters a numeric scale factor (e.g., `2` for 2x, `0.5` for half).
 //!
 //! Builds a [`Transaction`] with `Set*` ops for the history system.
+//!
+//! Note: v0.2.0 only supports text-input factor. A proper reference-length
+//! workflow (pick reference distance, then new distance) is deferred.
 
 use super::{Command, CommandInput, CommandResult, PreviewEntity};
 use crate::ecs::components::*;
@@ -19,7 +21,7 @@ use hecs::World;
 ///
 /// Captures the selection at construction time. Two-step state machine:
 /// - `base_point == None` → awaiting base point
-/// - `base_point == Some(p)` → awaiting scale factor
+/// - `base_point == Some(p)` → awaiting scale factor (text input only)
 pub struct ScaleCommand {
     /// Entities to scale (captured at construction time).
     selected_entities: Vec<hecs::Entity>,
@@ -187,7 +189,7 @@ impl Command for ScaleCommand {
         if self.base_point.is_none() {
             "Specify base point:".to_string()
         } else {
-            "Specify scale factor (or click second point for distance ratio):".to_string()
+            "Specify scale factor (e.g., 2 for 2x, 0.5 for half):".to_string()
         }
     }
 
@@ -209,35 +211,10 @@ impl Command for ScaleCommand {
                     self.base_point = Some(p);
                     CommandResult::Continue
                 } else {
-                    // Step 2: compute scale factor from distance ratio.
-                    let base = self.base_point.unwrap();
-                    let dist_to_base = p.distance(base);
-
-                    if dist_to_base < 1e-12 {
-                        return CommandResult::Error(
-                            "Second point is coincident with base point. Cannot determine scale factor."
-                                .to_string(),
-                        );
-                    }
-
-                    // We need a reference distance. For v0.2.0, use a simple
-                    // heuristic: the second click distance from base is the
-                    // new "unit" distance. Since we don't store a reference
-                    // distance from before, we need another approach.
-                    // Instead, use a fixed reference: the reference distance
-                    // is the average distance of selected entity geometry
-                    // from the base point. If that fails, use 1.0.
-                    let ref_dist = Self::compute_reference_distance(world, &self.selected_entities, base);
-
-                    let factor = if ref_dist > 1e-12 {
-                        dist_to_base / ref_dist
-                    } else {
-                        dist_to_base
-                    };
-
-                    self.pending_transaction =
-                        Some(self.apply_scale(world, base, factor));
-                    CommandResult::Complete
+                    // Step 2: point input is supported only via text factor.
+                    CommandResult::Error(
+                        "Enter a numeric scale factor (e.g., 2 for 2x).".to_string(),
+                    )
                 }
             }
             CommandInput::Text(s) => {
@@ -286,40 +263,6 @@ impl Command for ScaleCommand {
 
     fn preview(&self) -> Vec<PreviewEntity> {
         Vec::new()
-    }
-}
-
-impl ScaleCommand {
-    /// Compute a reference distance from `center` to the selected entities'
-    /// geometry. Used to derive a scale factor from a second point click.
-    fn compute_reference_distance(
-        world: &World,
-        entities: &[hecs::Entity],
-        center: Point2D,
-    ) -> f64 {
-        let mut total_dist = 0.0_f64;
-        let mut count = 0_usize;
-
-        for &entity in entities {
-            if let Ok(data) = world.get::<&LineData>(entity) {
-                total_dist += center.distance(data.start);
-                total_dist += center.distance(data.end);
-                count += 2;
-            } else if let Ok(data) = world.get::<&CircleData>(entity) {
-                total_dist += center.distance(data.center);
-                count += 1;
-            } else if let Ok(data) = world.get::<&ArcData>(entity) {
-                total_dist += center.distance(data.center);
-                count += 1;
-            } else if let Ok(data) = world.get::<&PolylineData>(entity) {
-                for v in &data.vertices {
-                    total_dist += center.distance(*v);
-                    count += 1;
-                }
-            }
-        }
-
-        if count == 0 { 1.0 } else { total_dist / count as f64 }
     }
 }
 
@@ -552,6 +495,38 @@ mod tests {
 
         let result = cmd.on_input(CommandInput::Text("-1".to_string()), &mut world);
         assert!(matches!(result, CommandResult::Error(_)));
+    }
+
+    // -- point-to-point returns error (forge-ki0) -------------------------
+
+    #[test]
+    fn scale_point_after_base_returns_error() {
+        let mut world = World::new();
+        let e = make_line(&mut world, Point2D::new(0.0, 0.0), Point2D::new(10.0, 0.0));
+
+        let mut sel = SelectionManager::new();
+        sel.select(&mut world, e);
+
+        let mut cmd = ScaleCommand::new(&sel);
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+
+        let result = cmd.on_input(CommandInput::Point(Point2D::new(5.0, 0.0)), &mut world);
+        assert!(matches!(result, CommandResult::Error(_)));
+        assert!(cmd.take_transaction().is_none(), "no transaction on point click");
+    }
+
+    #[test]
+    fn scale_prompt_after_base_mentions_text_only() {
+        let mut world = World::new();
+        let e = make_line(&mut world, Point2D::new(0.0, 0.0), Point2D::new(10.0, 0.0));
+
+        let mut sel = SelectionManager::new();
+        sel.select(&mut world, e);
+
+        let mut cmd = ScaleCommand::new(&sel);
+        let _ = cmd.on_input(CommandInput::Point(Point2D::new(0.0, 0.0)), &mut world);
+
+        assert!(cmd.prompt().contains("2 for 2x"), "prompt should mention text factor");
     }
 
     // -- cancel ------------------------------------------------------------
