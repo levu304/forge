@@ -14,11 +14,12 @@
 //! A single render pass then issues one draw call per non-empty type.
 //! This minimises state changes while keeping pipelines simple.
 
+use std::collections::HashSet;
 use std::f64::consts::PI;
 
 use super::EntityRenderer;
 use crate::ecs::components::{
-    ArcData, CircleData, LineData, PolylineData, Renderable,
+    ArcData, CircleData, LineData, PolylineData, Renderable, Selected,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -60,14 +61,23 @@ fn circle_segments_for_radius(radius: f64, zoom: f64) -> u32 {
 
 // ─── Vertex ──────────────────────────────────────────────────────────────────
 
-/// A single entity vertex: 2 × f32 position + 4 × f32 color = 24 bytes.
+/// A single entity vertex: position + color + per-instance selection flag.
 ///
-/// Layout matches `GridVertex` in `grid.rs` so shaders are interchangeable.
+/// | Field         | Type      | Offset | Size |
+/// |---------------|-----------|--------|------|
+/// | `position`    | `vec2<f>` | 0      | 8    |
+/// | `color`       | `vec4<f>` | 8      | 16   |
+/// | `is_selected` | `u32`     | 24     | 4    |
+/// | **Total**     |           |        | 28   |
+///
+/// When `is_selected` is `1`, the fragment shader blends a blue tint
+/// (`mix(color, selection_blue, 0.3)`) to indicate selection state.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub(super) struct EntityVertex {
     position: [f32; 2],
     color: [f32; 4],
+    is_selected: u32,
 }
 
 // ─── Helper: color array ────────────────────────────────────────────────────
@@ -87,7 +97,12 @@ fn color_to_array(c: &crate::util::Color) -> [f32; 4] {
 /// stay smooth.  Produces `num_segments + 1` vertices so the strip forms a
 /// closed loop (the last vertex equals the first).  Pushes into `out` to
 /// avoid per-entity Vec allocations.
-fn generate_circle_vertices(circle: &CircleData, zoom: f64, out: &mut Vec<EntityVertex>) {
+fn generate_circle_vertices(
+    circle: &CircleData,
+    zoom: f64,
+    is_selected: u32,
+    out: &mut Vec<EntityVertex>,
+) {
     let col = color_to_array(&circle.color);
     let cx = circle.center.x;
     let cy = circle.center.y;
@@ -101,6 +116,7 @@ fn generate_circle_vertices(circle: &CircleData, zoom: f64, out: &mut Vec<Entity
         out.push(EntityVertex {
             position: [(cx + r * theta.cos()) as f32, (cy + r * theta.sin()) as f32],
             color: col,
+            is_selected,
         });
     }
 }
@@ -113,7 +129,12 @@ fn generate_circle_vertices(circle: &CircleData, zoom: f64, out: &mut Vec<Entity
 /// screen-space radius (`radius × zoom`), between `MIN_ARC_SEGMENTS` and
 /// `CIRCLE_MAX_SEGMENTS`.  The last vertex is the end of the arc (not
 /// wrapped to start).  Pushes into `out` to avoid per-entity Vec allocations.
-fn generate_arc_vertices(arc: &ArcData, zoom: f64, out: &mut Vec<EntityVertex>) {
+fn generate_arc_vertices(
+    arc: &ArcData,
+    zoom: f64,
+    is_selected: u32,
+    out: &mut Vec<EntityVertex>,
+) {
     let col = color_to_array(&arc.color);
     let cx = arc.center.x;
     let cy = arc.center.y;
@@ -139,6 +160,7 @@ fn generate_arc_vertices(arc: &ArcData, zoom: f64, out: &mut Vec<EntityVertex>) 
         out.push(EntityVertex {
             position: [(cx + r * theta.cos()) as f32, (cy + r * theta.sin()) as f32],
             color: col,
+            is_selected,
         });
     }
 }
@@ -166,11 +188,12 @@ impl EntityRenderer {
         surface_format: wgpu::TextureFormat,
     ) -> Self {
         // ── Shared vertex buffer layout ───────────────────────────────────
-        // position: vec2<f32> at location 0 (offset 0,  8 bytes)
-        // color:    vec4<f32> at location 1 (offset 8, 16 bytes)
-        // stride:   24 bytes
+        // position:    vec2<f32> at location 0 (offset  0,  8 bytes)
+        // color:       vec4<f32> at location 1 (offset  8, 16 bytes)
+        // is_selected: u32       at location 2 (offset 24,  4 bytes)
+        // stride:   28 bytes
         let vertex_buffer_layout = wgpu::VertexBufferLayout {
-            array_stride: 24,
+            array_stride: 28,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
                 wgpu::VertexAttribute {
@@ -182,6 +205,11 @@ impl EntityRenderer {
                     format: wgpu::VertexFormat::Float32x4,
                     offset: 8,
                     shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Uint32,
+                    offset: 24,
+                    shader_location: 2,
                 },
             ],
         };
@@ -332,7 +360,16 @@ impl EntityRenderer {
         queue: &wgpu::Queue,
         device: &wgpu::Device,
     ) {
-        // ── 1. Clear per-type scratch buffers ────────────────────────────
+        // ── 1. Build selection set ──────────────────────────────────────
+        // Query all entities with the Selected marker component and collect
+        // into a HashSet for O(1) membership checks during vertex collection.
+        let selected: HashSet<hecs::Entity> = world
+            .query::<&Selected>()
+            .iter()
+            .map(|(e, _)| e)
+            .collect();
+
+        // ── 2. Clear per-type scratch buffers ───────────────────────────
         // These are reused every frame — clearing sets len = 0 without
         // freeing the backing allocation, so the buffer grows only to its
         // watermark and stops allocating.
@@ -342,14 +379,14 @@ impl EntityRenderer {
         self.arc_scratch.clear();
         self.polyline_scratch.clear();
 
-        // ── 2. Collect vertices into scratch buffers ─────────────────────
+        // ── 3. Collect vertices into scratch buffers ────────────────────
 
-        Self::collect_line_vertices(world, &mut self.line_scratch);
-        Self::collect_circle_vertices(world, zoom, &mut self.circle_scratch);
-        Self::collect_arc_vertices(world, zoom, &mut self.arc_scratch);
-        Self::collect_polyline_vertices(world, &mut self.polyline_scratch);
+        Self::collect_line_vertices(world, &selected, &mut self.line_scratch);
+        Self::collect_circle_vertices(world, zoom, &selected, &mut self.circle_scratch);
+        Self::collect_arc_vertices(world, zoom, &selected, &mut self.arc_scratch);
+        Self::collect_polyline_vertices(world, &selected, &mut self.polyline_scratch);
 
-        // ── 3. Upload to staging buffers (resize if needed) ──────────────
+        // ── 4. Upload to staging buffers (resize if needed) ──────────────
 
         Self::upload_vertices::<EntityVertex>(
             queue,
@@ -384,7 +421,7 @@ impl EntityRenderer {
             "Polyline Entity Staging Buffer",
         );
 
-        // ── 4. Single render pass (LoadOp::Load — grid already cleared) ──
+        // ── 5. Single render pass (LoadOp::Load — grid already cleared) ──
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Entity Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -402,7 +439,7 @@ impl EntityRenderer {
             multiview_mask: None,
         });
 
-        // ── 5. Draw each non-empty type ──────────────────────────────────
+        // ── 6. Draw each non-empty type ──────────────────────────────────
         if !self.line_scratch.is_empty() {
             render_pass.set_pipeline(&self.line_pipeline);
             render_pass.set_bind_group(0, camera_bind_group, &[]);
@@ -437,17 +474,25 @@ impl EntityRenderer {
     /// Collect vertices for all `LineData + Renderable` entities.
     ///
     /// Appends 2 vertices (start, end) per entity to `out`.
-    fn collect_line_vertices(world: &hecs::World, out: &mut Vec<EntityVertex>) {
+    /// Sets `is_selected = 1` when the entity is in the selection set.
+    fn collect_line_vertices(
+        world: &hecs::World,
+        selected: &HashSet<hecs::Entity>,
+        out: &mut Vec<EntityVertex>,
+    ) {
         let mut query = world.query::<(&LineData, &Renderable)>();
-        for (_, (line, _)) in query.iter() {
+        for (entity, (line, _)) in query.iter() {
             let col = color_to_array(&line.color);
+            let is_sel = u32::from(selected.contains(&entity));
             out.push(EntityVertex {
                 position: line.start.to_f32_array(),
                 color: col,
+                is_selected: is_sel,
             });
             out.push(EntityVertex {
                 position: line.end.to_f32_array(),
                 color: col,
+                is_selected: is_sel,
             });
         }
     }
@@ -456,22 +501,36 @@ impl EntityRenderer {
     ///
     /// Calls `generate_circle_vertices` for each circle and appends to `out`.
     /// The `zoom` parameter controls tessellation density (more zoom → more
-    /// segments for large circles).
-    fn collect_circle_vertices(world: &hecs::World, zoom: f64, out: &mut Vec<EntityVertex>) {
+    /// segments for large circles). Sets `is_selected = 1` when the entity
+    /// is in the selection set.
+    fn collect_circle_vertices(
+        world: &hecs::World,
+        zoom: f64,
+        selected: &HashSet<hecs::Entity>,
+        out: &mut Vec<EntityVertex>,
+    ) {
         let mut query = world.query::<(&CircleData, &Renderable)>();
-        for (_, (circle, _)) in query.iter() {
-            generate_circle_vertices(circle, zoom, out);
+        for (entity, (circle, _)) in query.iter() {
+            let is_sel = u32::from(selected.contains(&entity));
+            generate_circle_vertices(circle, zoom, is_sel, out);
         }
     }
 
     /// Collect vertices for all `ArcData + Renderable` entities.
     ///
     /// Calls `generate_arc_vertices` for each arc and appends to `out`.
-    /// The `zoom` parameter controls tessellation density.
-    fn collect_arc_vertices(world: &hecs::World, zoom: f64, out: &mut Vec<EntityVertex>) {
+    /// The `zoom` parameter controls tessellation density. Sets
+    /// `is_selected = 1` when the entity is in the selection set.
+    fn collect_arc_vertices(
+        world: &hecs::World,
+        zoom: f64,
+        selected: &HashSet<hecs::Entity>,
+        out: &mut Vec<EntityVertex>,
+    ) {
         let mut query = world.query::<(&ArcData, &Renderable)>();
-        for (_, (arc, _)) in query.iter() {
-            generate_arc_vertices(arc, zoom, out);
+        for (entity, (arc, _)) in query.iter() {
+            let is_sel = u32::from(selected.contains(&entity));
+            generate_arc_vertices(arc, zoom, is_sel, out);
         }
     }
 
@@ -479,21 +538,28 @@ impl EntityRenderer {
     ///
     /// Emits one vertex per point for each polyline; if `closed` and has
     /// at least 2 vertices, emits the first vertex again to close the loop.
+    /// Sets `is_selected = 1` when the entity is in the selection set.
     ///
     /// Entities with an empty vertex list are silently skipped to prevent
     /// degenerate buffer ranges.
-    fn collect_polyline_vertices(world: &hecs::World, out: &mut Vec<EntityVertex>) {
+    fn collect_polyline_vertices(
+        world: &hecs::World,
+        selected: &HashSet<hecs::Entity>,
+        out: &mut Vec<EntityVertex>,
+    ) {
         let mut query = world.query::<(&PolylineData, &Renderable)>();
-        for (_, (poly, _)) in query.iter() {
+        for (entity, (poly, _)) in query.iter() {
             if poly.vertices.is_empty() {
                 continue;
             }
             let col = color_to_array(&poly.color);
+            let is_sel = u32::from(selected.contains(&entity));
             // Emit one vertex per point.
             for point in &poly.vertices {
                 out.push(EntityVertex {
                     position: point.to_f32_array(),
                     color: col,
+                    is_selected: is_sel,
                 });
             }
             // If closed, emit the first vertex again to close the loop.
@@ -501,6 +567,7 @@ impl EntityRenderer {
                 out.push(EntityVertex {
                     position: poly.vertices[0].to_f32_array(),
                     color: col,
+                    is_selected: is_sel,
                 });
             }
         }
@@ -561,6 +628,7 @@ impl EntityRenderer {
 mod tests {
     use super::*;
     use crate::ecs::components::{ArcData, CircleData, PolylineData};
+    use crate::geometry::Point2D;
     use crate::util::Color;
 
     // ── circle_segments_for_radius ─────────────────────────────────────────
@@ -613,13 +681,13 @@ mod tests {
 
         // At zoom 1.0: radius*zoom = 100 → 100 segments → 101 vertices
         let mut buf = Vec::new();
-        generate_circle_vertices(&circle, 1.0, &mut buf);
+        generate_circle_vertices(&circle, 1.0, 0, &mut buf);
         // num_segments + 1 vertices (closed loop)
         assert_eq!(buf.len(), 101);
 
         // At zoom 0.05: radius*zoom = 5 → clamped to 8 → 9 vertices
         buf.clear();
-        generate_circle_vertices(&circle, 0.05, &mut buf);
+        generate_circle_vertices(&circle, 0.05, 0, &mut buf);
         assert_eq!(buf.len(), 9);
     }
 
@@ -633,7 +701,7 @@ mod tests {
         };
 
         let mut buf = Vec::new();
-        generate_circle_vertices(&circle, 1.0, &mut buf);
+        generate_circle_vertices(&circle, 1.0, 0, &mut buf);
 
         // First and last vertex should be identical (closed loop)
         assert!(!buf.is_empty());
@@ -650,7 +718,7 @@ mod tests {
         };
 
         let mut buf = Vec::new();
-        generate_circle_vertices(&circle, 1.0, &mut buf);
+        generate_circle_vertices(&circle, 1.0, 0, &mut buf);
 
         let expected_col = [1.0, 0.0, 0.0, 1.0];
         for v in &buf {
@@ -673,13 +741,13 @@ mod tests {
 
         // quarter circle at zoom 1.0: full=100, sweep_fraction=0.25 → 25
         let mut buf = Vec::new();
-        generate_arc_vertices(&arc, 1.0, &mut buf);
+        generate_arc_vertices(&arc, 1.0, 0, &mut buf);
         assert_eq!(buf.len(), 26); // 25 + 1
 
         // quarter circle at zoom 0.05: full=8 (min), sweep_fraction=0.25
         // 8 * 0.25 = 2 → clamped to MIN_ARC_SEGMENTS (4) → 5 vertices
         buf.clear();
-        generate_arc_vertices(&arc, 0.05, &mut buf);
+        generate_arc_vertices(&arc, 0.05, 0, &mut buf);
         assert_eq!(buf.len(), 5);
     }
 
@@ -695,7 +763,7 @@ mod tests {
         };
 
         let mut buf = Vec::new();
-        generate_arc_vertices(&arc, 1.0, &mut buf);
+        generate_arc_vertices(&arc, 1.0, 0, &mut buf);
 
         let expected_col = [0.0, 1.0, 0.0, 1.0];
         for v in &buf {
@@ -734,8 +802,9 @@ mod tests {
             Renderable,
         ));
 
+        let selected = HashSet::new();
         let mut buf = Vec::new();
-        EntityRenderer::collect_polyline_vertices(&world, &mut buf);
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
 
         // Only the non-empty polyline should produce vertices (2 points).
         assert_eq!(buf.len(), 2);
@@ -756,8 +825,9 @@ mod tests {
             Renderable,
         ));
 
+        let selected = HashSet::new();
         let mut buf = Vec::new();
-        EntityRenderer::collect_polyline_vertices(&world, &mut buf);
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
         assert!(buf.is_empty());
     }
 
@@ -786,10 +856,206 @@ mod tests {
             Renderable,
         ));
 
+        let selected = HashSet::new();
         let mut buf = Vec::new();
-        EntityRenderer::collect_line_vertices(&world, &mut buf);
+        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
 
         // 2 lines × 2 vertices each = 4
         assert_eq!(buf.len(), 4);
+    }
+
+    // ── Selection-aware vertex tests ──────────────────────────────────────
+
+    #[test]
+    fn test_collect_line_vertices_selected_entity_has_is_selected_1() {
+        let mut world = hecs::World::new();
+        let entity = world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 10.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(entity, Selected).ok();
+
+        let mut selected = HashSet::new();
+        selected.insert(entity);
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+
+        assert_eq!(buf.len(), 2, "one line should produce 2 vertices");
+        for v in &buf {
+            assert_eq!(v.is_selected, 1, "selected entity vertices should have is_selected=1");
+        }
+    }
+
+    #[test]
+    fn test_collect_line_vertices_non_selected_entity_has_is_selected_0() {
+        let mut world = hecs::World::new();
+        let entity = world.spawn((
+            LineData {
+                start: Point2D::new(5.0, 5.0),
+                end: Point2D::new(15.0, 15.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        // entity does NOT get Selected component, and is NOT in the selection set.
+
+        let selected = HashSet::new(); // empty — entity is not selected
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+
+        assert_eq!(buf.len(), 2);
+        for v in &buf {
+            assert_eq!(v.is_selected, 0, "non-selected entity vertices should have is_selected=0");
+        }
+    }
+
+    #[test]
+    fn test_collect_line_vertices_mixed_selection_has_correct_is_selected() {
+        let mut world = hecs::World::new();
+        let sel_entity = world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 10.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        let _unsel_entity = world.spawn((
+            LineData {
+                start: Point2D::new(100.0, 100.0),
+                end: Point2D::new(200.0, 200.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(sel_entity, Selected).ok();
+
+        let mut selected = HashSet::new();
+        selected.insert(sel_entity);
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+
+        // Two lines → 4 vertices. Count by selection flag (order-independent).
+        assert_eq!(buf.len(), 4, "2 lines should produce 4 vertices");
+        let sel_count = buf.iter().filter(|v| v.is_selected == 1).count();
+        let unsel_count = buf.iter().filter(|v| v.is_selected == 0).count();
+        assert_eq!(sel_count, 2, "exactly 2 vertices should be from the selected entity");
+        assert_eq!(unsel_count, 2, "exactly 2 vertices should be from the non-selected entity");
+    }
+
+    #[test]
+    fn test_collect_circle_vertices_selected_entity_has_is_selected_1() {
+        let mut world = hecs::World::new();
+        let entity = world.spawn((
+            CircleData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 10.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(entity, Selected).ok();
+
+        let mut selected = HashSet::new();
+        selected.insert(entity);
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &mut buf);
+
+        assert!(!buf.is_empty(), "circle should produce vertices");
+        for v in &buf {
+            assert_eq!(v.is_selected, 1, "selected circle vertices should have is_selected=1");
+        }
+    }
+
+    #[test]
+    fn test_collect_circle_vertices_not_selected_has_is_selected_0() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            CircleData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 10.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &mut buf);
+
+        assert!(!buf.is_empty());
+        for v in &buf {
+            assert_eq!(v.is_selected, 0, "non-selected circle vertices should have is_selected=0");
+        }
+    }
+
+    #[test]
+    fn test_collect_polyline_vertices_selected_entity_has_is_selected_1() {
+        let mut world = hecs::World::new();
+        let entity = world.spawn((
+            PolylineData {
+                vertices: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(50.0, 0.0),
+                    Point2D::new(50.0, 50.0),
+                ],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(entity, Selected).ok();
+
+        let mut selected = HashSet::new();
+        selected.insert(entity);
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
+
+        assert_eq!(buf.len(), 3, "open polyline with 3 points should produce 3 vertices");
+        for v in &buf {
+            assert_eq!(v.is_selected, 1, "selected polyline vertices should have is_selected=1");
+        }
+    }
+
+    #[test]
+    fn test_collect_polyline_vertices_not_selected_has_is_selected_0() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            PolylineData {
+                vertices: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(30.0, 0.0),
+                ],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
+
+        assert_eq!(buf.len(), 2);
+        for v in &buf {
+            assert_eq!(v.is_selected, 0, "non-selected polyline vertices should have is_selected=0");
+        }
     }
 }

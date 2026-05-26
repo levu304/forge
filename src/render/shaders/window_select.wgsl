@@ -1,12 +1,8 @@
-// Selection highlight overlay shaders (v0.2.0 placeholder).
+// Window-select rectangle vertex/fragment shaders.
 //
-// Intended for future bounding-box overlay rendering — draws a dashed
-// rectangle around the full selection set.  For v0.2.0 the actual
-// selection highlight is handled by the entity shader's per-instance
-// `is_selected` attribute (see `entity.wgsl`).
-//
-// This shader is structured identically to `entity.wgsl` so it can be
-// swapped in once the overlay pass is active.
+// Renders a translucent filled quad with a border for window-selection
+// feedback.  The quad is drawn in world-space coordinates with per-vertex
+// colour (fill alpha ≈ 0.15, border alpha ≈ 0.8).
 //
 // Vertex format:
 //   @location(0) position: vec2<f32>  (offset 0, 8 bytes)
