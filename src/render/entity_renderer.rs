@@ -628,6 +628,7 @@ impl EntityRenderer {
 mod tests {
     use super::*;
     use crate::ecs::components::{ArcData, CircleData, PolylineData};
+    use crate::geometry::Point2D;
     use crate::util::Color;
 
     // ── circle_segments_for_radius ─────────────────────────────────────────
@@ -861,5 +862,200 @@ mod tests {
 
         // 2 lines × 2 vertices each = 4
         assert_eq!(buf.len(), 4);
+    }
+
+    // ── Selection-aware vertex tests ──────────────────────────────────────
+
+    #[test]
+    fn test_collect_line_vertices_selected_entity_has_is_selected_1() {
+        let mut world = hecs::World::new();
+        let entity = world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 10.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(entity, Selected).ok();
+
+        let mut selected = HashSet::new();
+        selected.insert(entity);
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+
+        assert_eq!(buf.len(), 2, "one line should produce 2 vertices");
+        for v in &buf {
+            assert_eq!(v.is_selected, 1, "selected entity vertices should have is_selected=1");
+        }
+    }
+
+    #[test]
+    fn test_collect_line_vertices_non_selected_entity_has_is_selected_0() {
+        let mut world = hecs::World::new();
+        let entity = world.spawn((
+            LineData {
+                start: Point2D::new(5.0, 5.0),
+                end: Point2D::new(15.0, 15.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        // entity does NOT get Selected component, and is NOT in the selection set.
+
+        let selected = HashSet::new(); // empty — entity is not selected
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+
+        assert_eq!(buf.len(), 2);
+        for v in &buf {
+            assert_eq!(v.is_selected, 0, "non-selected entity vertices should have is_selected=0");
+        }
+    }
+
+    #[test]
+    fn test_collect_line_vertices_mixed_selection_has_correct_is_selected() {
+        let mut world = hecs::World::new();
+        let sel_entity = world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 10.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        let _unsel_entity = world.spawn((
+            LineData {
+                start: Point2D::new(100.0, 100.0),
+                end: Point2D::new(200.0, 200.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(sel_entity, Selected).ok();
+
+        let mut selected = HashSet::new();
+        selected.insert(sel_entity);
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+
+        // Two lines → 4 vertices. Count by selection flag (order-independent).
+        assert_eq!(buf.len(), 4, "2 lines should produce 4 vertices");
+        let sel_count = buf.iter().filter(|v| v.is_selected == 1).count();
+        let unsel_count = buf.iter().filter(|v| v.is_selected == 0).count();
+        assert_eq!(sel_count, 2, "exactly 2 vertices should be from the selected entity");
+        assert_eq!(unsel_count, 2, "exactly 2 vertices should be from the non-selected entity");
+    }
+
+    #[test]
+    fn test_collect_circle_vertices_selected_entity_has_is_selected_1() {
+        let mut world = hecs::World::new();
+        let entity = world.spawn((
+            CircleData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 10.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(entity, Selected).ok();
+
+        let mut selected = HashSet::new();
+        selected.insert(entity);
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &mut buf);
+
+        assert!(!buf.is_empty(), "circle should produce vertices");
+        for v in &buf {
+            assert_eq!(v.is_selected, 1, "selected circle vertices should have is_selected=1");
+        }
+    }
+
+    #[test]
+    fn test_collect_circle_vertices_not_selected_has_is_selected_0() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            CircleData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 10.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &mut buf);
+
+        assert!(!buf.is_empty());
+        for v in &buf {
+            assert_eq!(v.is_selected, 0, "non-selected circle vertices should have is_selected=0");
+        }
+    }
+
+    #[test]
+    fn test_collect_polyline_vertices_selected_entity_has_is_selected_1() {
+        let mut world = hecs::World::new();
+        let entity = world.spawn((
+            PolylineData {
+                vertices: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(50.0, 0.0),
+                    Point2D::new(50.0, 50.0),
+                ],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(entity, Selected).ok();
+
+        let mut selected = HashSet::new();
+        selected.insert(entity);
+
+        let mut buf = Vec::new();
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
+
+        assert_eq!(buf.len(), 3, "open polyline with 3 points should produce 3 vertices");
+        for v in &buf {
+            assert_eq!(v.is_selected, 1, "selected polyline vertices should have is_selected=1");
+        }
+    }
+
+    #[test]
+    fn test_collect_polyline_vertices_not_selected_has_is_selected_0() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            PolylineData {
+                vertices: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(30.0, 0.0),
+                ],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
+
+        assert_eq!(buf.len(), 2);
+        for v in &buf {
+            assert_eq!(v.is_selected, 0, "non-selected polyline vertices should have is_selected=0");
+        }
     }
 }
