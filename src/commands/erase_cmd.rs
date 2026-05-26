@@ -385,6 +385,33 @@ mod tests {
                 "no transaction after cancel");
     }
 
+    // -- re-use after cancel -----------------------------------------------
+
+    #[test]
+    fn erase_reusable_after_cancel() {
+        let mut world = World::new();
+        let e = make_line(&mut world);
+
+        let mut sel = SelectionManager::new();
+        sel.select(&mut world, e);
+
+        let mut cmd = EraseCommand::new(&sel);
+
+        // Cancel before execution — state resets but selection is retained
+        let result = cmd.on_input(CommandInput::Cancel, &mut world);
+        assert!(matches!(result, CommandResult::Cancelled));
+        assert!(!cmd.is_empty(), "selected entities persist after cancel");
+        assert!(cmd.take_transaction().is_none(),
+                "no transaction after cancel");
+
+        // Confirm after cancel — should still work (same selection)
+        let result = cmd.on_input(CommandInput::Confirm, &mut world);
+        assert!(matches!(result, CommandResult::Complete));
+        assert_eq!(count_entities(&world), 0, "entities erased after cancel-then-confirm");
+        assert!(cmd.take_transaction().is_some(),
+                "transaction available after cancel-then-confirm");
+    }
+
     #[test]
     fn erase_take_transaction_consumes() {
         let mut world = World::new();
