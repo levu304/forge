@@ -32,9 +32,8 @@ pub struct EraseCommand {
 impl EraseCommand {
     /// Create a new ERASE command, capturing the current selection.
     ///
-    /// Returns `None` if the selection is empty (caller should not activate
-    /// the command). Use [`new`](EraseCommand::new) and check
-    /// [`is_empty`](EraseCommand::is_empty) to decide.
+    /// The command will be empty if nothing was selected. Callers should
+    /// check [`is_empty`](EraseCommand::is_empty) before activating.
     pub fn new(selection: &SelectionManager) -> Self {
         Self {
             selected_entities: selection.selected.iter().copied().collect(),
