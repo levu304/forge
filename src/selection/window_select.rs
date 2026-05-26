@@ -79,10 +79,6 @@ pub struct WindowSelectState {
     pub current: Point2D,
     /// Selection mode — updated from screen-space drag direction on release.
     pub mode: WindowSelectMode,
-    /// Drag start position in screen coordinates (for mode determination).
-    pub start_screen: (f64, f64),
-    /// Current drag position in screen coordinates (for mode determination).
-    pub current_screen: (f64, f64),
 }
 
 impl WindowSelectState {
@@ -91,19 +87,11 @@ impl WindowSelectState {
     /// The mode defaults to [`Enclosing`](WindowSelectMode::Enclosing) and
     /// should be updated by calling [`mode_from_drag`] on mouse release with
     /// the screen-space coordinates.
-    pub fn new(
-        start: Point2D,
-        current: Point2D,
-        mode: WindowSelectMode,
-        start_screen: (f64, f64),
-        current_screen: (f64, f64),
-    ) -> Self {
+    pub fn new(start: Point2D, current: Point2D) -> Self {
         Self {
             start,
             current,
-            mode,
-            start_screen,
-            current_screen,
+            mode: WindowSelectMode::Enclosing,
         }
     }
 
@@ -193,15 +181,10 @@ mod tests {
         let ws = WindowSelectState::new(
             Point2D::new(10.0, 20.0),
             Point2D::new(50.0, 60.0),
-            WindowSelectMode::Enclosing,
-            (10.0, 20.0),
-            (50.0, 60.0),
         );
         assert_eq!(ws.start, Point2D::new(10.0, 20.0));
         assert_eq!(ws.current, Point2D::new(50.0, 60.0));
         assert_eq!(ws.mode, WindowSelectMode::Enclosing);
-        assert_eq!(ws.start_screen, (10.0, 20.0));
-        assert_eq!(ws.current_screen, (50.0, 60.0));
     }
 
     #[test]
@@ -210,9 +193,6 @@ mod tests {
         let ws = WindowSelectState::new(
             Point2D::new(100.0, 200.0),
             Point2D::new(0.0, 0.0),
-            WindowSelectMode::Enclosing,
-            (100.0, 200.0),
-            (0.0, 0.0),
         );
         assert_eq!(ws.start, Point2D::new(100.0, 200.0));
         assert_eq!(ws.current, Point2D::new(0.0, 0.0));
@@ -328,8 +308,6 @@ mod tests {
             start: Point2D::new(0.0, 0.0),
             current: Point2D::new(10.0, 10.0),
             mode: WindowSelectMode::Enclosing,
-            start_screen: (0.0, 0.0),
-            current_screen: (10.0, 10.0),
         };
 
         let mut results = ws.query(&index);
@@ -354,8 +332,6 @@ mod tests {
             start: Point2D::new(0.0, 0.0),
             current: Point2D::new(10.0, 10.0),
             mode: WindowSelectMode::Crossing,
-            start_screen: (0.0, 0.0),
-            current_screen: (10.0, 10.0),
         };
 
         let mut results = ws.query(&index);
@@ -380,8 +356,6 @@ mod tests {
             start: Point2D::new(10.0, 10.0),
             current: Point2D::new(0.0, 0.0),
             mode: WindowSelectMode::Enclosing,
-            start_screen: (10.0, 10.0),
-            current_screen: (0.0, 0.0),
         };
 
         let results_reverse = ws_reverse.query(&index);
@@ -397,8 +371,6 @@ mod tests {
             start: Point2D::new(5.0, 5.0),
             current: Point2D::new(5.0, 5.0),
             mode: WindowSelectMode::Enclosing,
-            start_screen: (5.0, 5.0),
-            current_screen: (5.0, 5.0),
         };
 
         let results = ws.query(&index);
@@ -416,8 +388,6 @@ mod tests {
             start: Point2D::new(5.0, 5.0),
             current: Point2D::new(5.0, 5.0),
             mode: WindowSelectMode::Crossing,
-            start_screen: (5.0, 5.0),
-            current_screen: (5.0, 5.0),
         };
 
         let results = ws.query(&index);
@@ -435,8 +405,6 @@ mod tests {
             start: Point2D::new(-100.0, -100.0),
             current: Point2D::new(100.0, 100.0),
             mode: WindowSelectMode::Enclosing,
-            start_screen: (-100.0, -100.0),
-            current_screen: (100.0, 100.0),
         };
 
         let results = ws.query(&index);
@@ -451,8 +419,6 @@ mod tests {
             start: Point2D::new(-100.0, -100.0),
             current: Point2D::new(100.0, 100.0),
             mode: WindowSelectMode::Crossing,
-            start_screen: (-100.0, -100.0),
-            current_screen: (100.0, 100.0),
         };
 
         let results = ws.query(&index);

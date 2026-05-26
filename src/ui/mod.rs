@@ -16,8 +16,6 @@ pub mod property_panel;
 
 use crate::commands::CommandState;
 use crate::ecs::resources::{CameraState, InputState};
-use crate::selection::SelectionManager;
-use crate::snap::SnapEngine;
 use egui::ViewportId;
 
 /// Output from one egui frame, carrying both rendered shapes and
@@ -60,13 +58,11 @@ impl UiSystem {
     ///
     /// # Parameters
     ///
-    /// * `window`    – The winit window (for input state and cursor management).
-    /// * `camera`    – Current camera state (used by the status bar).
-    /// * `input`     – Current input state (mouse coords shown in status bar).
+    /// * `window`  – The winit window (for input state and cursor management).
+    /// * `camera`  – Current camera state (used by the status bar).
+    /// * `input`   – Current input state (mouse coords shown in status bar).
     /// * `cmd_state` – Command state (command line prompt, text buffer, errors).
-    /// * `world`     – The ECS world (used by the property panel).
-    /// * `snap`      – Snap engine (used by status bar for snap indicators).
-    /// * `selection` – Selection manager (used by status bar for selection count).
+    /// * `world`   – The ECS world (used by the property panel).
     pub fn run(
         &mut self,
         window: &winit::window::Window,
@@ -74,8 +70,6 @@ impl UiSystem {
         input: &InputState,
         cmd_state: &mut CommandState,
         world: &hecs::World,
-        snap: &SnapEngine,
-        selection: &SelectionManager,
     ) -> UiOutput {
         let raw_input = self.egui_state.take_egui_input(window);
         let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
@@ -83,7 +77,7 @@ impl UiSystem {
             // egui::Panel::show_inside for proper window-edge docking.
             // This is the non-deprecated API in egui 0.34 (TopBottomPanel
             // and SidePanel aliases are deprecated; use Panel directly).
-            status_bar::draw(ui, camera, input, snap, selection);
+            status_bar::draw(ui, camera, input);
             toolbar::draw(ui, cmd_state);
             property_panel::draw(ui, world);
             command_line::draw(ui, cmd_state);
