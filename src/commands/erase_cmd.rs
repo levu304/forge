@@ -118,7 +118,9 @@ impl Command for EraseCommand {
 
                 // Now despawn all entities from the ECS world.
                 for &entity in &self.selected_entities {
-                    world.despawn(entity).ok();
+                    if let Err(e) = world.despawn(entity) {
+                        tracing::warn!("erase: failed to despawn entity {:?}: {}", entity, e);
+                    }
                 }
 
                 self.pending_transaction = Some(tx);
@@ -153,7 +155,7 @@ mod tests {
     use crate::geometry::Point2D;
     use crate::selection::SelectionManager;
     use crate::util::Color;
-    use hecs::World;
+use hecs::World;
 
     // -- helpers -----------------------------------------------------------
 

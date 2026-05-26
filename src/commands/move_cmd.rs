@@ -87,16 +87,24 @@ impl MoveCommand {
                 // Polylines need clone because they don't implement Copy.
                 match &new {
                     AtomicOpValue::Line(v) => {
-                        world.insert_one(entity, *v).ok();
+                        if let Err(e) = world.insert_one(entity, *v) {
+                            tracing::warn!("move: failed to update entity {:?}: {}", entity, e);
+                        }
                     }
                     AtomicOpValue::Circle(v) => {
-                        world.insert_one(entity, *v).ok();
+                        if let Err(e) = world.insert_one(entity, *v) {
+                            tracing::warn!("move: failed to update entity {:?}: {}", entity, e);
+                        }
                     }
                     AtomicOpValue::Arc(v) => {
-                        world.insert_one(entity, *v).ok();
+                        if let Err(e) = world.insert_one(entity, *v) {
+                            tracing::warn!("move: failed to update entity {:?}: {}", entity, e);
+                        }
                     }
                     AtomicOpValue::Polyline(v) => {
-                        world.insert_one(entity, v.clone()).ok();
+                        if let Err(e) = world.insert_one(entity, v.clone()) {
+                            tracing::warn!("move: failed to update entity {:?}: {}", entity, e);
+                        }
                     }
                 }
 
@@ -256,7 +264,7 @@ mod tests {
     use super::*;
     use crate::selection::SelectionManager;
     use crate::util::Color;
-    use hecs::World;
+use hecs::World;
 
     // -- helpers -----------------------------------------------------------
 
