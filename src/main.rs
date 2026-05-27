@@ -340,7 +340,6 @@ impl ApplicationHandler for ForgeAppHandler {
             // Click-without-drag: leave selection and picking alone.
             // The picking pass will resolve on the next frame, and
             // `handle_picking_result` in the render loop will apply it.
-
             state.window.request_redraw();
         }
 
