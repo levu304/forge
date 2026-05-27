@@ -28,7 +28,7 @@ use winit::{
 };
 
 use forge::app::ForgeApp;
-use forge::commands::{CommandInput, CommandResult};
+use forge::commands::CommandInput;
 use forge::history::apply_entity_remapping;
 use forge::input::{apply_camera_action, InputAction};
 use forge::selection::window_select::WindowSelectState;
@@ -230,28 +230,20 @@ impl ApplicationHandler for ForgeAppHandler {
         for action in actions {
             match action {
                 InputAction::Click(point) => {
+                    // Delegate command result handling to the shared method
+                    // so the lifecycle stays consistent across all paths.
+                    let outcome;
                     if let Some(ref mut cmd) = state.app.command_state.active {
                         let result =
                             cmd.on_input(CommandInput::Point(point), &mut state.app.world);
-                        match result {
-                            CommandResult::Complete => {
-                                // Extract transaction for history before dropping cmd.
-                                if let Some(tx) = cmd.take_transaction() {
-                                    state.app.history.push(tx);
-                                }
-                                state.app.command_state.active = None;
-                                state.app.command_state.last_error = None;
-                            }
-                            CommandResult::Cancelled => {
-                                state.app.command_state.active = None;
-                                state.app.command_state.last_error = None;
-                            }
-                            CommandResult::Error(msg) => {
-                                tracing::warn!("Command error: {}", msg);
-                                state.app.command_state.last_error = Some(msg);
-                            }
-                            _ => {}
-                        }
+                        outcome = Some((result, cmd.take_transaction()));
+                    } else {
+                        outcome = None;
+                    }
+
+                    if let Some((result, tx)) = outcome {
+                        state.app.handle_command_result(result, tx);
+                        state.window.request_redraw();
                     } else {
                         // No active command: request GPU picking AND start
                         // window select drag.
@@ -274,6 +266,7 @@ impl ApplicationHandler for ForgeAppHandler {
                         cmd.on_cancel(&mut state.app.world);
                     }
                     state.app.command_state.active = None;
+                    state.window.request_redraw();
                 }
                 InputAction::CommandText(ref text) => {
                     state.app.dispatch_command_text(text);
@@ -294,28 +287,17 @@ impl ApplicationHandler for ForgeAppHandler {
                     }
                 }
                 InputAction::Confirm => {
+                    let outcome;
                     if let Some(ref mut cmd) = state.app.command_state.active {
                         let result =
                             cmd.on_input(CommandInput::Confirm, &mut state.app.world);
-                        match result {
-                            CommandResult::Complete => {
-                                if let Some(tx) = cmd.take_transaction() {
-                                    state.app.history.push(tx);
-                                }
-                                state.app.command_state.active = None;
-                                state.app.command_state.last_error = None;
-                                state.window.request_redraw();
-                            }
-                            CommandResult::Cancelled => {
-                                state.app.command_state.active = None;
-                                state.app.command_state.last_error = None;
-                            }
-                            CommandResult::Error(msg) => {
-                                tracing::warn!("Command error: {}", msg);
-                                state.app.command_state.last_error = Some(msg);
-                            }
-                            _ => {}
-                        }
+                        outcome = Some((result, cmd.take_transaction()));
+                    } else {
+                        outcome = None;
+                    }
+                    if let Some((result, tx)) = outcome {
+                        state.app.handle_command_result(result, tx);
+                        state.window.request_redraw();
                     }
                 }
                 // Text — handled by egui command line or deferred.
