@@ -6,10 +6,13 @@
 
 use crate::commands::{CommandState, PendingModifyCommand};
 
+const BUTTON_SPACING: f32 = 4.0;
+
 /// Draw the toolbar panel on the left side of the viewport.
 ///
-/// Clicking a button sets [`CommandState::pending_dispatch`] which
-/// is consumed by the event-loop handler to start the command.
+/// Clicking a button sets [`CommandState::pending_dispatch`] (for draw
+/// commands) or [`CommandState::pending_modify_command`] (for modify
+/// commands), each consumed by the event-loop handler to start the command.
 pub fn draw(ui: &mut egui::Ui, cmd_state: &mut CommandState) {
     egui::Panel::left("toolbar")
         .resizable(false)
@@ -19,65 +22,35 @@ pub fn draw(ui: &mut egui::Ui, cmd_state: &mut CommandState) {
                 ui.add_space(8.0);
 
                 // ── Draw commands ────────────────────────────────────────
-                if ui.button("LINE").clicked() {
-                    cmd_state.pending_dispatch = Some("LINE".into());
-                }
-                ui.add_space(4.0);
-
-                if ui.button("CIRCLE").clicked() {
-                    cmd_state.pending_dispatch = Some("CIRCLE".into());
-                }
-                ui.add_space(4.0);
-
-                if ui.button("ARC").clicked() {
-                    cmd_state.pending_dispatch = Some("ARC".into());
-                }
-                ui.add_space(4.0);
-
-                if ui.button("PLINE").clicked() {
-                    cmd_state.pending_dispatch = Some("PLINE".into());
+                for &name in &["LINE", "CIRCLE", "ARC", "PLINE"] {
+                    if ui.button(name).clicked() {
+                        cmd_state.pending_dispatch = Some(name.into());
+                    }
+                    ui.add_space(BUTTON_SPACING);
                 }
 
                 ui.separator();
-                ui.add_space(4.0);
+                ui.add_space(BUTTON_SPACING);
 
                 // ── Modify commands ──────────────────────────────────────
                 // NOTE: These bypass the text parser entirely; they set
                 // `pending_modify_command` which is consumed by the event
                 // loop to construct the concrete command with access to
-                // `SelectionManager`.  (forge-51x: use same enum).
-                if ui.button("ERASE").clicked() {
-                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Erase);
-                }
-                ui.add_space(4.0);
-
-                if ui.button("MOVE").clicked() {
-                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Move);
-                }
-                ui.add_space(4.0);
-
-                if ui.button("COPY").clicked() {
-                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Copy);
-                }
-                ui.add_space(4.0);
-
-                if ui.button("ROTATE").clicked() {
-                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Rotate);
-                }
-                ui.add_space(4.0);
-
-                if ui.button("SCALE").clicked() {
-                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Scale);
-                }
-                ui.add_space(4.0);
-
-                if ui.button("MIRROR").clicked() {
-                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Mirror);
-                }
-                ui.add_space(4.0);
-
-                if ui.button("OFFSET").clicked() {
-                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Offset);
+                // `SelectionManager` (forge-51x).
+                const MODIFY_COMMANDS: &[(&str, PendingModifyCommand)] = &[
+                    ("ERASE", PendingModifyCommand::Erase),
+                    ("MOVE", PendingModifyCommand::Move),
+                    ("COPY", PendingModifyCommand::Copy),
+                    ("ROTATE", PendingModifyCommand::Rotate),
+                    ("SCALE", PendingModifyCommand::Scale),
+                    ("MIRROR", PendingModifyCommand::Mirror),
+                    ("OFFSET", PendingModifyCommand::Offset),
+                ];
+                for &(label, cmd) in MODIFY_COMMANDS {
+                    if ui.button(label).clicked() {
+                        cmd_state.pending_modify_command = Some(cmd);
+                    }
+                    ui.add_space(BUTTON_SPACING);
                 }
             });
         });
