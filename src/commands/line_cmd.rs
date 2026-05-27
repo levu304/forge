@@ -8,6 +8,7 @@
 use crate::commands::{Command, CommandInput, CommandResult, PreviewEntity};
 use crate::ecs::components::{LineData, Renderable};
 use crate::geometry::Point2D;
+use crate::history::{AtomicOp, Transaction};
 use crate::util::Color;
 use hecs::World;
 
@@ -18,6 +19,9 @@ pub struct LineCommand {
     pending_points: Vec<Point2D>,
     /// Rubber-band line preview (deferred to v0.2.0+).
     preview_entity: Option<PreviewEntity>,
+    /// Transaction populated on `Confirm`, consumed by caller via
+    /// [`take_transaction`](LineCommand::take_transaction).
+    pending_transaction: Option<Transaction>,
 }
 
 impl Default for LineCommand {
@@ -31,7 +35,15 @@ impl LineCommand {
         Self {
             pending_points: Vec::new(),
             preview_entity: None,
+            pending_transaction: None,
         }
+    }
+
+    /// Consume the pending transaction after command completion.
+    ///
+    /// Returns `None` if the command has not completed yet.
+    pub fn take_transaction(&mut self) -> Option<Transaction> {
+        self.pending_transaction.take()
     }
 }
 
@@ -67,8 +79,14 @@ impl Command for LineCommand {
                 CommandResult::Continue
             }
             CommandInput::Confirm if self.pending_points.len() >= 2 => {
+                let mut tx = Transaction::new(format!(
+                    "Line ({} segment{})",
+                    self.pending_points.len() - 1,
+                    if self.pending_points.len() == 2 { "" } else { "s" },
+                ));
+
                 for window in self.pending_points.windows(2) {
-                    world.spawn((
+                    let entity = world.spawn((
                         LineData {
                             start: window[0],
                             end: window[1],
@@ -77,7 +95,12 @@ impl Command for LineCommand {
                         },
                         Renderable,
                     ));
+                    tx.push(AtomicOp::SpawnLine {
+                        entity,
+                        data: *world.get::<&LineData>(entity).unwrap(),
+                    });
                 }
+                self.pending_transaction = Some(tx);
                 CommandResult::Complete
             }
             CommandInput::Cancel => {
@@ -96,6 +119,11 @@ impl Command for LineCommand {
     fn on_cancel(&mut self, _world: &mut World) {
         self.pending_points.clear();
         self.preview_entity = None;
+        self.pending_transaction = None;
+    }
+
+    fn take_transaction(&mut self) -> Option<Transaction> {
+        self.pending_transaction.take()
     }
 }
 

@@ -561,6 +561,14 @@ impl PickingPass {
         self.pending_result
     }
 
+    /// Cancel any pending pick request without performing a readback.
+    ///
+    /// Called when window selection fires so that a stale picking result
+    /// does not overwrite the window-selected entity set on the next frame.
+    pub fn cancel_pick(&mut self) {
+        self.pending_result = None;
+    }
+
     // ── Private: entity vertex collection ───────────────────────────────
 
     /// Collect all `LineData + Renderable` entities.

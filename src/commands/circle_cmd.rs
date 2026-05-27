@@ -41,4 +41,8 @@ impl Command for CircleCommand {
     fn on_cancel(&mut self, _world: &mut World) {
         // No-op: nothing to clean up.
     }
+
+    fn take_transaction(&mut self) -> Option<crate::history::Transaction> {
+        None
+    }
 }
