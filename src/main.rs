@@ -261,6 +261,10 @@ impl ApplicationHandler for ForgeAppHandler {
             // so right-to-left drags use Crossing (green) and left-to-right
             // drags use Enclosing (blue).
             ws.update_mode_from_screen();
+            // Ensure spatial index is clean before querying; entities may
+            // have been created/modified since the last rebuild, and snap
+            // is the only other caller of ensure_clean.
+            state.app.spatial_index.ensure_clean(&state.app.world);
             let entities = ws.query(&state.app.spatial_index);
             // Replace current selection with window-select results.
             state.app.selection_manager.clear(&mut state.app.world);
