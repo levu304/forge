@@ -293,7 +293,32 @@ impl ApplicationHandler for ForgeAppHandler {
                         state.window.request_redraw();
                     }
                 }
-                // Confirm, Text — handled by egui command line or deferred.
+                InputAction::Confirm => {
+                    if let Some(ref mut cmd) = state.app.command_state.active {
+                        let result =
+                            cmd.on_input(CommandInput::Confirm, &mut state.app.world);
+                        match result {
+                            CommandResult::Complete => {
+                                if let Some(tx) = cmd.take_transaction() {
+                                    state.app.history.push(tx);
+                                }
+                                state.app.command_state.active = None;
+                                state.app.command_state.last_error = None;
+                                state.window.request_redraw();
+                            }
+                            CommandResult::Cancelled => {
+                                state.app.command_state.active = None;
+                                state.app.command_state.last_error = None;
+                            }
+                            CommandResult::Error(msg) => {
+                                tracing::warn!("Command error: {}", msg);
+                                state.app.command_state.last_error = Some(msg);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                // Text — handled by egui command line or deferred.
                 _ => {}
             }
         }

@@ -439,7 +439,12 @@ impl ForgeApp {
         if let Some(ref mut cmd) = self.command_state.active {
             let trimmed = text.trim();
 
-            let input = if let Ok((_, point)) = commands::parser::parse_point(trimmed) {
+            let input = if trimmed.is_empty() {
+                // Empty dispatch from the command line while a command is
+                // active → treat as Confirm (e.g. pressing Enter after
+                // placing enough points via mouse clicks).
+                Some(CommandInput::Confirm)
+            } else if let Ok((_, point)) = commands::parser::parse_point(trimmed) {
                 Some(CommandInput::Point(point))
             } else {
                 Some(CommandInput::Text(trimmed.to_string()))
