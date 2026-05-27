@@ -212,14 +212,35 @@ impl ApplicationHandler for ForgeAppHandler {
             .egui_state
             .on_window_event(&state.window, &event);
 
-        // egui signals repaint:true for CursorMoved even when event isn't
-        // consumed — honoring this ensures hover states update immediately
-        // before we run the snap pipeline below.
-        if response.repaint || response.consumed {
-            state.window.request_redraw();
-        }
+        let is_cursor_moved = matches!(&event, WindowEvent::CursorMoved { .. });
+
         if response.consumed {
+            // egui wants exclusive use of this event (e.g. text input, widget
+            // interaction).  Still request a redraw so any visual feedback
+            // from the consumed event is rendered.
+            state.window.request_redraw();
+            // On macOS, synchronous render for CursorMoved ensures hover
+            // state is current before the run loop may sleep for another
+            // 8 ms (120 Hz) or coalesce multiple cursor events into a later
+            // RedrawRequested.  (fix/brew-5n — hover activation on Apple Silicon)
+            if is_cursor_moved {
+                tracing::debug!(
+                    "CursorMoved consumed, rendering sync (egui using pointer)"
+                );
+                state.app.render(&state.window);
+            }
             return;
+        }
+
+        // egui signals repaint:true for CursorMoved even when event isn't
+        // consumed — honouring this ensures hover states update immediately.
+        if response.repaint {
+            state.window.request_redraw();
+            // Synchronous render for CursorMoved (see above).
+            if is_cursor_moved {
+                tracing::debug!("CursorMoved repaint, rendering sync");
+                state.app.render(&state.window);
+            }
         }
 
         // ── 2. Map remaining events to input actions (with snap) ─────────

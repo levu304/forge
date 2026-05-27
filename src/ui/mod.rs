@@ -78,6 +78,7 @@ impl UiSystem {
         selection: &SelectionManager,
     ) -> UiOutput {
         let raw_input = self.egui_state.take_egui_input(window);
+
         let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
             // Panel drawing functions accept &mut egui::Ui and use
             // egui::Panel::show_inside for proper window-edge docking.
