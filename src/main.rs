@@ -209,9 +209,13 @@ impl ApplicationHandler for ForgeAppHandler {
                             _ => {}
                         }
                     } else {
-                        // No active command: start window select drag.
+                        // No active command: start window select drag,
+                        // recording the screen-space start position so the
+                        // selection mode (enclosing vs crossing) can be
+                        // determined from drag direction on release.
+                        let screen = state.app.input_mapper.state.mouse_screen;
                         state.app.window_select_state =
-                            Some(WindowSelectState::new(point, point));
+                            Some(WindowSelectState::new(point, point, (screen.0 as f64, screen.1 as f64)));
                     }
                 }
                 InputAction::Pan(_, _) | InputAction::Zoom(_, _) => {
@@ -230,6 +234,8 @@ impl ApplicationHandler for ForgeAppHandler {
                     // Update window select rectangle if dragging
                     if let Some(ref mut ws) = state.app.window_select_state {
                         ws.current = point;
+                        let screen = state.app.input_mapper.state.mouse_screen;
+                        ws.current_screen = (screen.0 as f64, screen.1 as f64);
                     }
                     // Request redraw so active command previews or the
                     // selection rectangle update.
@@ -250,7 +256,11 @@ impl ApplicationHandler for ForgeAppHandler {
         if state.app.window_select_state.is_some()
             && !state.app.input_mapper.state.left_down
         {
-            let ws = state.app.window_select_state.take().unwrap();
+            let mut ws = state.app.window_select_state.take().unwrap();
+            // Resolve selection mode from drag direction before querying,
+            // so right-to-left drags use Crossing (green) and left-to-right
+            // drags use Enclosing (blue).
+            ws.update_mode_from_screen();
             let entities = ws.query(&state.app.spatial_index);
             // Replace current selection with window-select results.
             state.app.selection_manager.clear(&mut state.app.world);
