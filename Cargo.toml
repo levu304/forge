@@ -33,6 +33,7 @@ bytemuck = { version = "1.25", features = ["derive"] }
 
 [dev-dependencies]
 egui_kittest = "0.34"
+wesl = { version = "0.4", features = ["eval"] }
 
 [profile.release]
 opt-level = 3
