@@ -24,10 +24,14 @@ use winit::window::Window;
 use crate::commands::{
     self, line_cmd::LineCommand, Command, CommandInput, CommandResult, CommandState,
 };
-use crate::ecs::resources::{CameraState, GridConfig};
+use crate::ecs::resources::{CameraState, GridConfig, SnapConfig};
 use crate::geometry::Point2D;
+use crate::history::History;
 use crate::input::InputMapper;
 use crate::render::RenderState;
+use crate::selection::{window_select::WindowSelectState, SelectionManager};
+use crate::snap::SnapEngine;
+use crate::spatial::SpatialIndex;
 use crate::ui::UiSystem;
 use crate::util::Color;
 
@@ -48,6 +52,15 @@ pub struct ResourceBank {
 ///
 /// Created once per window lifecycle in `ForgeApp::new()`, then driven
 /// by the winit event loop via `render()` and `dispatch_command_text()`.
+///
+/// # v0.2.0 additions
+///
+/// * [`selection_manager`] — tracks the current entity selection set.
+/// * [`snap_engine`]       — provides 7 snap types for precision input.
+/// * [`spatial_index`]     — rstar R‑tree spatial index for snap/window queries.
+/// * [`history`]           — undo/redo command journal.
+/// * [`needs_picking`]     — flag for next-frame GPU picking readback (Step 15).
+/// * [`window_select_state`] — active window selection drag (if any).
 pub struct ForgeApp {
     /// ECS world holding all entities and components.
     pub world: hecs::World,
@@ -61,6 +74,18 @@ pub struct ForgeApp {
     pub ui_system: UiSystem,
     /// Maps winit events to `InputAction`s.
     pub input_mapper: InputMapper,
+    /// Selection manager (selected entity set, primary entity, mode).
+    pub selection_manager: SelectionManager,
+    /// Snap engine (7 snap types, config, last result).
+    pub snap_engine: SnapEngine,
+    /// Spatial index (rstar R‑tree for snap + window select queries).
+    pub spatial_index: SpatialIndex,
+    /// Undo/redo command journal.
+    pub history: History,
+    /// True when a GPU picking request is pending (consumed in render loop).
+    pub needs_picking: bool,
+    /// Active window selection drag state (None when not dragging).
+    pub window_select_state: Option<WindowSelectState>,
 }
 
 impl ForgeApp {
@@ -91,6 +116,13 @@ impl ForgeApp {
         let ui_system = UiSystem::new(&window);
         let input_mapper = InputMapper::new();
 
+        let selection_manager = SelectionManager::new();
+        let snap_engine = SnapEngine::new(SnapConfig::default());
+        let spatial_index = SpatialIndex::new();
+        let history = History::new();
+        let needs_picking = false;
+        let window_select_state = None;
+
         Self {
             world,
             resources,
@@ -98,6 +130,12 @@ impl ForgeApp {
             render_state,
             ui_system,
             input_mapper,
+            selection_manager,
+            snap_engine,
+            spatial_index,
+            history,
+            needs_picking,
+            window_select_state,
         }
     }
 
@@ -227,6 +265,8 @@ impl ForgeApp {
             &self.input_mapper.state,
             &mut self.command_state,
             &self.world,
+            &self.snap_engine,
+            &self.selection_manager,
         );
 
         let screen_size = self.resources.camera.viewport_size;

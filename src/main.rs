@@ -30,6 +30,7 @@ use winit::{
 use forge::app::ForgeApp;
 use forge::commands::{CommandInput, CommandResult};
 use forge::input::{apply_camera_action, InputAction};
+use forge::selection::window_select::WindowSelectState;
 
 // ─── ForgeState ──────────────────────────────────────────────────────────────
 
@@ -170,11 +171,14 @@ impl ApplicationHandler for ForgeAppHandler {
             return;
         }
 
-        // ── 2. Map remaining events to input actions ──────────────────────
-        let actions = state
-            .app
-            .input_mapper
-            .handle_event(&event, &state.app.resources.camera);
+        // ── 2. Map remaining events to input actions (with snap) ─────────
+        let actions = state.app.input_mapper.handle_event(
+            &event,
+            &state.app.resources.camera,
+            &mut state.app.snap_engine,
+            &state.app.world,
+            &mut state.app.spatial_index,
+        );
 
         for action in actions {
             match action {
@@ -197,6 +201,10 @@ impl ApplicationHandler for ForgeAppHandler {
                             }
                             _ => {}
                         }
+                    } else {
+                        // No active command: start window select drag.
+                        state.app.window_select_state =
+                            Some(WindowSelectState::new(point, point));
                     }
                 }
                 InputAction::Pan(_, _) | InputAction::Zoom(_, _) => {
@@ -211,15 +219,40 @@ impl ApplicationHandler for ForgeAppHandler {
                 InputAction::CommandText(ref text) => {
                     state.app.dispatch_command_text(text);
                 }
-                InputAction::MouseMoved(_) => {
-                    // Request redraw so active command previews update.
-                    if state.app.command_state.active.is_some() {
+                InputAction::MouseMoved(point) => {
+                    // Update window select rectangle if dragging
+                    if let Some(ref mut ws) = state.app.window_select_state {
+                        ws.current = point;
+                    }
+                    // Request redraw so active command previews or the
+                    // selection rectangle update.
+                    if state.app.command_state.active.is_some()
+                        || state.app.window_select_state.is_some()
+                    {
                         state.window.request_redraw();
                     }
                 }
                 // Confirm, Text — handled by egui command line or deferred.
                 _ => {}
             }
+        }
+
+        // ── 3. Window select: finalize on left release ─────────────────
+        // When left_down becomes false while window_select_state is active,
+        // query the spatial index and apply the selection.
+        if state.app.window_select_state.is_some()
+            && !state.app.input_mapper.state.left_down
+        {
+            let ws = state.app.window_select_state.take().unwrap();
+            let entities = ws.query(&state.app.spatial_index);
+            // Replace current selection with window-select results.
+            state.app.selection_manager.clear(&mut state.app.world);
+            for entity in entities {
+                state.app
+                    .selection_manager
+                    .select(&mut state.app.world, entity);
+            }
+            state.window.request_redraw();
         }
 
         state.window.request_redraw();
