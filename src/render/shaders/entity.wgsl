@@ -43,6 +43,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // Selection blue tint: mix with rgb(0.0, 0.588, 1.0) at 30%
         color = mix(color, vec4<f32>(0.0, 0.588, 1.0, 1.0), 0.3);
     }
-    color.a = 1.0;
+    color.a = 1.0; // v0.2.0: all entities are opaque (no transparency/layer system)
     return color;
 }
