@@ -7,6 +7,9 @@
 // The vertex shader passes @builtin(instance_index) through as a flat
 // u32 to the fragment shader, which writes it as the red channel of
 // the output. A sentinel value of 0xFFFFFFFF means "no entity".
+// NOTE: If entity count ever exceeds ~4.3B, a valid entity at index
+// 0xFFFFFFFF would collide with the sentinel. Not a practical concern
+// for any realistic v0.2.0 drawing.
 //
 // Vertex format: position (vec2<f32>) at location 0 only.
 // Stride = 8 bytes (no colour attribute needed for picking).
@@ -17,7 +20,7 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) @flat entity_id: u32,
+    @location(0) @interpolate(flat) entity_id: u32,
 };
 
 @group(0) @binding(0)
