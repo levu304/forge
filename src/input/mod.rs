@@ -3,9 +3,17 @@
 //! Maps winit window events to application-level actions.
 //! Mouse and keyboard events are handled here; camera control (pan/zoom)
 //! is delegated to the `camera_control` submodule.
+//!
+//! # Snap integration
+//!
+//! Before emitting [`InputAction::MouseMoved`] the input mapper queries the
+//! [`SnapEngine`] so that mouse world coordinates are snapped to geometry
+//! (endpoints, midpoints, etc.) before commands or the UI see them.
 
 use crate::ecs::resources::{CameraState, InputState};
 use crate::geometry::Point2D;
+use crate::snap::SnapEngine;
+use crate::spatial::SpatialIndex;
 
 pub mod camera_control;
 pub use camera_control::apply_camera_action;
@@ -78,6 +86,13 @@ impl InputMapper {
     /// modifier keys). The returned [`Vec<InputAction>`] is consumed by the
     /// application loop.
     ///
+    /// ## Snap integration
+    ///
+    /// On [`CursorMoved`](winit::event::WindowEvent::CursorMoved) the raw
+    /// world-space cursor position is passed through [`SnapEngine::snap`]
+    /// before being stored in [`state.mouse_world`](InputState::mouse_world)
+    /// and emitted as [`MouseMoved`](InputAction::MouseMoved).
+    ///
     /// ## Event priority (delegated to caller)
     ///
     /// This method does **not** decide whether an event is consumed by egui.
@@ -100,6 +115,9 @@ impl InputMapper {
         &mut self,
         event: &winit::event::WindowEvent,
         camera: &CameraState,
+        snap_engine: &mut SnapEngine,
+        world: &hecs::World,
+        spatial: &mut SpatialIndex,
     ) -> Vec<InputAction> {
         use winit::{
             event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
@@ -114,7 +132,16 @@ impl InputMapper {
                 let sx = position.x.clamp(0.0, 65536.0) as f32;
                 let sy = position.y.clamp(0.0, 65536.0) as f32;
                 self.state.mouse_screen = (sx, sy);
-                self.state.mouse_world = camera.screen_to_world(self.state.mouse_screen);
+                let raw_world = camera.screen_to_world(self.state.mouse_screen);
+                // Snap the world coordinates before storing / emitting.
+                let snapped = snap_engine.snap(
+                    raw_world,
+                    self.state.mouse_screen,
+                    world,
+                    spatial,
+                    camera,
+                );
+                self.state.mouse_world = snapped.point;
                 actions.push(InputAction::MouseMoved(self.state.mouse_world));
             }
 
@@ -127,8 +154,9 @@ impl InputMapper {
                 ElementState::Pressed => match button {
                     MouseButton::Left => {
                         self.state.left_down = true;
-                        let click_world = camera.screen_to_world(self.state.mouse_screen);
-                        actions.push(InputAction::Click(click_world));
+                        // Use snapped mouse_world (set during last CursorMoved) so
+                        // commands receive the exact snap target coordinate.
+                        actions.push(InputAction::Click(self.state.mouse_world));
                     }
                     MouseButton::Middle => {
                         self.state.middle_down = true;
@@ -247,10 +275,24 @@ impl InputMapper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecs::components::{LineData, Renderable};
+    use crate::ecs::resources::SnapConfig;
+    use crate::snap::SnapEngine;
+    use crate::spatial::SpatialIndex;
+    use crate::util::Color;
+    use hecs::World;
     use winit::{
         dpi::PhysicalPosition,
         event::{DeviceId, MouseScrollDelta, TouchPhase, WindowEvent},
     };
+
+    /// Helper: create default test resources (snap engine, world, spatial index).
+    fn test_resources() -> (SnapEngine, World, SpatialIndex) {
+        let snap_engine = SnapEngine::new(SnapConfig::default());
+        let world = World::new();
+        let spatial = SpatialIndex::new();
+        (snap_engine, world, spatial)
+    }
 
     /// Helper to construct a `MouseWheel` event for testing.
     fn make_wheel_event(delta: MouseScrollDelta) -> WindowEvent {
@@ -269,11 +311,12 @@ mod tests {
             target: Point2D::new(0.0, 0.0),
             zoom: 1.0,
             viewport_size: (1000, 1000),
-            clear_color: crate::util::Color::BLACK,
+            clear_color: Color::BLACK,
         };
+        let (mut snap_engine, world, mut spatial) = test_resources();
 
         let event = make_wheel_event(MouseScrollDelta::LineDelta(0.0, 1.0));
-        let actions = mapper.handle_event(&event, &camera);
+        let actions = mapper.handle_event(&event, &camera, &mut snap_engine, &world, &mut spatial);
 
         let zoom_action = actions.iter().find_map(|a| {
             if let InputAction::Zoom(dy, _) = a { Some(*dy) } else { None }
@@ -283,6 +326,71 @@ mod tests {
             zoom_action.unwrap() > 0.0,
             "LineDelta positive Y should zoom in (positive delta), got {}",
             zoom_action.unwrap()
+        );
+    }
+
+    /// Helper: build a MouseInput press event for left click.
+    fn make_left_click_event() -> WindowEvent {
+        WindowEvent::MouseInput {
+            device_id: DeviceId::dummy(),
+            state: winit::event::ElementState::Pressed,
+            button: winit::event::MouseButton::Left,
+        }
+    }
+
+    #[test]
+    fn snap_integration_click_uses_snapped_world() {
+        let mut mapper = InputMapper::new();
+        let camera = CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 1.0,
+            viewport_size: (800, 600),
+            clear_color: Color::BLACK,
+        };
+
+        let mut snap_engine = SnapEngine::new(SnapConfig::default());
+        let mut world = World::new();
+        let mut spatial = SpatialIndex::new();
+
+        // Line endpoint at (0,0) — within snap aperture of screen centre.
+        let _entity = world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 10.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        spatial.rebuild(&world);
+
+        // Step 1: move cursor near screen centre — raw world (5,0), endpoint (0,0) is
+        // 5px away (within 12px aperture). Snapped must correct to (0,0).
+        // If snap is broken, we'd get (5,0) and the test fails.
+        let move_event = make_cursor_event(405.0, 300.0);
+        mapper.handle_event(&move_event, &camera, &mut snap_engine, &world, &mut spatial);
+
+        // Step 2: click — should emit Click action with already-snapped coords.
+        let click_event = make_left_click_event();
+        let actions = mapper.handle_event(&click_event, &camera, &mut snap_engine, &world, &mut spatial);
+
+        let click = actions.iter().find_map(|a| {
+            if let InputAction::Click(p) = a { Some(*p) } else { None }
+        });
+        assert!(
+            click.is_some(),
+            "expected a Click action",
+        );
+        let clicked = click.unwrap();
+        assert!(
+            (clicked.x - 0.0).abs() < 0.01,
+            "expected click x near 0.0 (snapped endpoint), got {}",
+            clicked.x,
+        );
+        assert!(
+            (clicked.y - 0.0).abs() < 0.01,
+            "expected click y near 0.0 (snapped endpoint), got {}",
+            clicked.y,
         );
     }
 
@@ -331,13 +439,14 @@ mod tests {
             target: Point2D::new(0.0, 0.0),
             zoom: 1.0,
             viewport_size: (1000, 1000),
-            clear_color: crate::util::Color::BLACK,
+            clear_color: Color::BLACK,
         };
+        let (mut snap_engine, world, mut spatial) = test_resources();
 
         let event = make_wheel_event(MouseScrollDelta::PixelDelta(
             PhysicalPosition::new(0.0, 100.0),
         ));
-        let actions = mapper.handle_event(&event, &camera);
+        let actions = mapper.handle_event(&event, &camera, &mut snap_engine, &world, &mut spatial);
 
         let zoom_action = actions.iter().find_map(|a| {
             if let InputAction::Zoom(dy, _) = a { Some(*dy) } else { None }
@@ -347,6 +456,81 @@ mod tests {
             zoom_action.unwrap() < 0.0,
             "PixelDelta positive Y should zoom out (negative delta), got {}",
             zoom_action.unwrap()
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Snap integration
+    // ------------------------------------------------------------------
+
+    /// Helper: build a CursorMoved event at a given screen position.
+    fn make_cursor_event(x: f64, y: f64) -> WindowEvent {
+        WindowEvent::CursorMoved {
+            device_id: DeviceId::dummy(),
+            position: PhysicalPosition::new(x, y),
+        }
+    }
+
+    #[test]
+    fn snap_integration_snaps_to_endpoint_on_mouse_move() {
+        let mut mapper = InputMapper::new();
+        let camera = CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 1.0,
+            viewport_size: (800, 600),
+            clear_color: Color::BLACK,
+        };
+
+        let mut snap_engine = SnapEngine::new(SnapConfig::default());
+        let mut world = World::new();
+        let mut spatial = SpatialIndex::new();
+
+        // Create a line from (0,0) to (10,10) so the endpoint (0,0) is
+        // within snap aperture when the cursor is at screen centre.
+        let _entity = world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 10.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        spatial.rebuild(&world);
+
+        // Screen (405,300) maps to raw world (5,0) at zoom=1.
+        // The line endpoint (0,0) is 5px away in screen-space (within 12px aperture).
+        // If snap is broken, we'd get (5,0) and the test fails.
+        let event = make_cursor_event(405.0, 300.0);
+        let actions = mapper.handle_event(
+            &event,
+            &camera,
+            &mut snap_engine,
+            &world,
+            &mut spatial,
+        );
+
+        let moved = actions.iter().find_map(|a| {
+            if let InputAction::MouseMoved(p) = a { Some(*p) } else { None }
+        });
+        assert!(
+            moved.is_some(),
+            "expected a MouseMoved action",
+        );
+        let snapped = moved.unwrap();
+        assert!(
+            (snapped.x - 0.0).abs() < 0.01,
+            "expected snapped x near 0.0, got {}",
+            snapped.x,
+        );
+        assert!(
+            (snapped.y - 0.0).abs() < 0.01,
+            "expected snapped y near 0.0, got {}",
+            snapped.y,
+        );
+        assert!(
+            snap_engine.last_result.is_some(),
+            "snap_engine.last_result should be set after snap",
         );
     }
 }

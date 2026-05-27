@@ -1,4 +1,4 @@
-//! Forge v0.1.0 — Entry point and winit event loop.
+//! Forge v0.2.0 — Entry point and winit event loop.
 //!
 //! Initialises structured logging, creates the window and `ForgeApp`,
 //! then runs the winit [`ApplicationHandler`] event loop.
@@ -30,6 +30,7 @@ use winit::{
 use forge::app::ForgeApp;
 use forge::commands::{CommandInput, CommandResult};
 use forge::input::{apply_camera_action, InputAction};
+use forge::selection::window_select::WindowSelectState;
 
 // ─── ForgeState ──────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ impl ApplicationHandler for ForgeAppHandler {
         }
 
         let window_attributes = winit::window::WindowAttributes::default()
-            .with_title("Forge v0.1.0")
+            .with_title("Forge v0.2.0")
             .with_inner_size(LogicalSize::new(1280, 720));
 
         let window = match event_loop.create_window(window_attributes) {
@@ -94,7 +95,7 @@ impl ApplicationHandler for ForgeAppHandler {
         if let Some(state) = &self.state {
             state.window.request_redraw();
         }
-        tracing::info!("Forge v0.1.0 ready");
+        tracing::info!("Forge v0.2.0 ready");
     }
 
     // ── window_event ──────────────────────────────────────────────────────
@@ -151,6 +152,13 @@ impl ApplicationHandler for ForgeAppHandler {
             state.app.dispatch_command_text(&text);
         }
 
+        // ── Dispatch pending modify command from toolbar buttons ────────
+        // This bypasses the text parser, constructing the concrete command
+        // directly with access to SelectionManager (forge-51x fix).
+        if let Some(cmd_type) = state.app.command_state.pending_modify_command.take() {
+            state.app.dispatch_modify_command(cmd_type);
+        }
+
         // ── Process pending cancel requests (set by egui Escape handler) ──
         state
             .app
@@ -170,11 +178,14 @@ impl ApplicationHandler for ForgeAppHandler {
             return;
         }
 
-        // ── 2. Map remaining events to input actions ──────────────────────
-        let actions = state
-            .app
-            .input_mapper
-            .handle_event(&event, &state.app.resources.camera);
+        // ── 2. Map remaining events to input actions (with snap) ─────────
+        let actions = state.app.input_mapper.handle_event(
+            &event,
+            &state.app.resources.camera,
+            &mut state.app.snap_engine,
+            &state.app.world,
+            &mut state.app.spatial_index,
+        );
 
         for action in actions {
             match action {
@@ -197,6 +208,14 @@ impl ApplicationHandler for ForgeAppHandler {
                             }
                             _ => {}
                         }
+                    } else {
+                        // No active command: start window select drag,
+                        // recording the screen-space start position so the
+                        // selection mode (enclosing vs crossing) can be
+                        // determined from drag direction on release.
+                        let screen = state.app.input_mapper.state.mouse_screen;
+                        state.app.window_select_state =
+                            Some(WindowSelectState::new(point, point, (screen.0 as f64, screen.1 as f64)));
                     }
                 }
                 InputAction::Pan(_, _) | InputAction::Zoom(_, _) => {
@@ -211,15 +230,50 @@ impl ApplicationHandler for ForgeAppHandler {
                 InputAction::CommandText(ref text) => {
                     state.app.dispatch_command_text(text);
                 }
-                InputAction::MouseMoved(_) => {
-                    // Request redraw so active command previews update.
-                    if state.app.command_state.active.is_some() {
+                InputAction::MouseMoved(point) => {
+                    // Update window select rectangle if dragging
+                    if let Some(ref mut ws) = state.app.window_select_state {
+                        ws.current = point;
+                        let screen = state.app.input_mapper.state.mouse_screen;
+                        ws.current_screen = (screen.0 as f64, screen.1 as f64);
+                    }
+                    // Request redraw so active command previews or the
+                    // selection rectangle update.
+                    if state.app.command_state.active.is_some()
+                        || state.app.window_select_state.is_some()
+                    {
                         state.window.request_redraw();
                     }
                 }
                 // Confirm, Text — handled by egui command line or deferred.
                 _ => {}
             }
+        }
+
+        // ── 3. Window select: finalize on left release ─────────────────
+        // When left_down becomes false while window_select_state is active,
+        // query the spatial index and apply the selection.
+        if state.app.window_select_state.is_some()
+            && !state.app.input_mapper.state.left_down
+        {
+            let mut ws = state.app.window_select_state.take().unwrap();
+            // Resolve selection mode from drag direction before querying,
+            // so right-to-left drags use Crossing (green) and left-to-right
+            // drags use Enclosing (blue).
+            ws.update_mode_from_screen();
+            // Ensure spatial index is clean before querying; entities may
+            // have been created/modified since the last rebuild, and snap
+            // is the only other caller of ensure_clean.
+            state.app.spatial_index.ensure_clean(&state.app.world);
+            let entities = ws.query(&state.app.spatial_index);
+            // Replace current selection with window-select results.
+            state.app.selection_manager.clear(&mut state.app.world);
+            for entity in entities {
+                state.app
+                    .selection_manager
+                    .select(&mut state.app.world, entity);
+            }
+            state.window.request_redraw();
         }
 
         state.window.request_redraw();

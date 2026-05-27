@@ -69,6 +69,7 @@ pub enum WindowSelectMode {
 /// let ws = WindowSelectState::new(
 ///     Point2D::new(10.0, 20.0),
 ///     Point2D::new(50.0, 60.0),
+///     (0.0, 0.0),
 /// );
 /// assert_eq!(ws.mode, WindowSelectMode::Enclosing);
 /// ```
@@ -77,6 +78,10 @@ pub struct WindowSelectState {
     pub start: Point2D,
     /// Current drag position in world coordinates.
     pub current: Point2D,
+    /// Drag start position in screen-space pixels.
+    pub start_screen: (f64, f64),
+    /// Current drag position in screen-space pixels.
+    pub current_screen: (f64, f64),
     /// Selection mode — updated from screen-space drag direction on release.
     pub mode: WindowSelectMode,
 }
@@ -85,12 +90,17 @@ impl WindowSelectState {
     /// Creates a new window selection state.
     ///
     /// The mode defaults to [`Enclosing`](WindowSelectMode::Enclosing) and
-    /// should be updated by calling [`mode_from_drag`] on mouse release with
-    /// the screen-space coordinates.
-    pub fn new(start: Point2D, current: Point2D) -> Self {
+    /// should be updated by calling [`update_mode_from_screen`] on mouse release
+    /// so that right-to-left drags produce [`Crossing`](WindowSelectMode::Crossing)
+    /// mode.
+    ///
+    /// [`update_mode_from_screen`]: WindowSelectState::update_mode_from_screen
+    pub fn new(start: Point2D, current: Point2D, screen: (f64, f64)) -> Self {
         Self {
             start,
             current,
+            start_screen: screen,
+            current_screen: screen,
             mode: WindowSelectMode::Enclosing,
         }
     }
@@ -121,6 +131,14 @@ impl WindowSelectState {
         } else {
             WindowSelectMode::Crossing
         }
+    }
+
+    /// Updates [`self.mode`] from the stored screen-space coordinates.
+    ///
+    /// Should be called before [`query`] on mouse release so that the drag
+    /// direction is reflected in the spatial query.
+    pub fn update_mode_from_screen(&mut self) {
+        self.mode = Self::mode_from_drag(self.start_screen, self.current_screen);
     }
 
     /// Queries the spatial index for entities matching the selection
@@ -181,9 +199,12 @@ mod tests {
         let ws = WindowSelectState::new(
             Point2D::new(10.0, 20.0),
             Point2D::new(50.0, 60.0),
+            (0.0, 0.0),
         );
         assert_eq!(ws.start, Point2D::new(10.0, 20.0));
         assert_eq!(ws.current, Point2D::new(50.0, 60.0));
+        assert_eq!(ws.start_screen, (0.0, 0.0));
+        assert_eq!(ws.current_screen, (0.0, 0.0));
         assert_eq!(ws.mode, WindowSelectMode::Enclosing);
     }
 
@@ -193,9 +214,11 @@ mod tests {
         let ws = WindowSelectState::new(
             Point2D::new(100.0, 200.0),
             Point2D::new(0.0, 0.0),
+            (0.0, 0.0),
         );
         assert_eq!(ws.start, Point2D::new(100.0, 200.0));
         assert_eq!(ws.current, Point2D::new(0.0, 0.0));
+        assert_eq!(ws.start_screen, (0.0, 0.0));
     }
 
     // ------------------------------------------------------------------
@@ -307,6 +330,8 @@ mod tests {
         let ws = WindowSelectState {
             start: Point2D::new(0.0, 0.0),
             current: Point2D::new(10.0, 10.0),
+            start_screen: (0.0, 0.0),
+            current_screen: (10.0, 0.0),
             mode: WindowSelectMode::Enclosing,
         };
 
@@ -331,6 +356,8 @@ mod tests {
         let ws = WindowSelectState {
             start: Point2D::new(0.0, 0.0),
             current: Point2D::new(10.0, 10.0),
+            start_screen: (0.0, 0.0),
+            current_screen: (10.0, 0.0),
             mode: WindowSelectMode::Crossing,
         };
 
@@ -355,6 +382,8 @@ mod tests {
         let ws_reverse = WindowSelectState {
             start: Point2D::new(10.0, 10.0),
             current: Point2D::new(0.0, 0.0),
+            start_screen: (10.0, 0.0),
+            current_screen: (0.0, 0.0),
             mode: WindowSelectMode::Enclosing,
         };
 
@@ -370,6 +399,8 @@ mod tests {
         let ws = WindowSelectState {
             start: Point2D::new(5.0, 5.0),
             current: Point2D::new(5.0, 5.0),
+            start_screen: (5.0, 0.0),
+            current_screen: (5.0, 0.0),
             mode: WindowSelectMode::Enclosing,
         };
 
@@ -387,6 +418,8 @@ mod tests {
         let ws = WindowSelectState {
             start: Point2D::new(5.0, 5.0),
             current: Point2D::new(5.0, 5.0),
+            start_screen: (5.0, 0.0),
+            current_screen: (5.0, 0.0),
             mode: WindowSelectMode::Crossing,
         };
 
@@ -404,6 +437,8 @@ mod tests {
         let ws = WindowSelectState {
             start: Point2D::new(-100.0, -100.0),
             current: Point2D::new(100.0, 100.0),
+            start_screen: (0.0, 0.0),
+            current_screen: (10.0, 0.0),
             mode: WindowSelectMode::Enclosing,
         };
 
@@ -418,6 +453,8 @@ mod tests {
         let ws = WindowSelectState {
             start: Point2D::new(-100.0, -100.0),
             current: Point2D::new(100.0, 100.0),
+            start_screen: (0.0, 0.0),
+            current_screen: (10.0, 0.0),
             mode: WindowSelectMode::Crossing,
         };
 
