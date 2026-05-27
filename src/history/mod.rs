@@ -24,17 +24,10 @@
 //!
 //! # Usage
 //!
-//! ```ignore
-//! let mut history = History::new();
-//! let mut world = World::new();
-//!
-//! // After a command completes:
-//! history.push(transaction);
-//!
-//! // On Ctrl+Z:
-//! let label = history.undo(&mut world);
-//! let mapping = history.take_entity_mapping();
-//! apply_entity_remapping(&mut selection, &mut spatial, &mapping);
+//! ```text
+//! // history.undo(&mut world) returns the label and updates EntityMapping
+//! // apply_entity_remapping(&mut selection, &mut spatial, &mapping)
+//! //   remaps stale entity handles after undo/redo
 //! ```
 
 pub mod transaction;

@@ -14,9 +14,9 @@ use crate::history::ops::AtomicOp;
 /// # Examples
 ///
 /// ```ignore
-/// let mut tx = Transaction::new("Move 1 entity");
-/// tx.push(AtomicOp::SetPosition { entity, old: pos1, new: pos2 });
-/// assert!(!tx.is_empty());
+/// // Transaction bundles AtomicOps under a human-readable label:
+/// //   let mut tx = Transaction::new("Move 1 entity");
+/// //   tx.push(AtomicOp::SetPosition { entity, old: pos1, new: pos2 });
 /// ```
 #[derive(Debug, Clone)]
 pub struct Transaction {
