@@ -154,8 +154,9 @@ impl InputMapper {
                 ElementState::Pressed => match button {
                     MouseButton::Left => {
                         self.state.left_down = true;
-                        let click_world = camera.screen_to_world(self.state.mouse_screen);
-                        actions.push(InputAction::Click(click_world));
+                        // Use snapped mouse_world (set during last CursorMoved) so
+                        // commands receive the exact snap target coordinate.
+                        actions.push(InputAction::Click(self.state.mouse_world));
                     }
                     MouseButton::Middle => {
                         self.state.middle_down = true;
@@ -325,6 +326,69 @@ mod tests {
             zoom_action.unwrap() > 0.0,
             "LineDelta positive Y should zoom in (positive delta), got {}",
             zoom_action.unwrap()
+        );
+    }
+
+    /// Helper: build a MouseInput press event for left click.
+    fn make_left_click_event() -> WindowEvent {
+        WindowEvent::MouseInput {
+            device_id: DeviceId::dummy(),
+            state: winit::event::ElementState::Pressed,
+            button: winit::event::MouseButton::Left,
+        }
+    }
+
+    #[test]
+    fn snap_integration_click_uses_snapped_world() {
+        let mut mapper = InputMapper::new();
+        let camera = CameraState {
+            target: Point2D::new(0.0, 0.0),
+            zoom: 1.0,
+            viewport_size: (800, 600),
+            clear_color: Color::BLACK,
+        };
+
+        let mut snap_engine = SnapEngine::new(SnapConfig::default());
+        let mut world = World::new();
+        let mut spatial = SpatialIndex::new();
+
+        // Line endpoint at (0,0) — within snap aperture of screen centre.
+        let _entity = world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 10.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        spatial.rebuild(&world);
+
+        // Step 1: move cursor to screen centre — snaps mouse_world to endpoint (0,0).
+        let move_event = make_cursor_event(400.0, 300.0);
+        mapper.handle_event(&move_event, &camera, &mut snap_engine, &world, &mut spatial);
+
+        // Step 2: click — should emit Click action with already-snapped coords.
+        let click_event = make_left_click_event();
+        let actions = mapper.handle_event(&click_event, &camera, &mut snap_engine, &world, &mut spatial);
+
+        let click = actions.iter().find_map(|a| {
+            if let InputAction::Click(p) = a { Some(*p) } else { None }
+        });
+        assert!(
+            click.is_some(),
+            "expected a Click action",
+        );
+        let clicked = click.unwrap();
+        assert!(
+            (clicked.x - 0.0).abs() < 0.01,
+            "expected click x near 0.0 (snapped endpoint), got {}",
+            clicked.x,
+        );
+        assert!(
+            (clicked.y - 0.0).abs() < 0.01,
+            "expected click y near 0.0 (snapped endpoint), got {}",
+            clicked.y,
         );
     }
 
