@@ -17,7 +17,7 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) @flat entity_id: u32,
+    @location(0) @interpolate(flat) entity_id: u32,
 };
 
 @group(0) @binding(0)
