@@ -364,8 +364,10 @@ mod tests {
         ));
         spatial.rebuild(&world);
 
-        // Step 1: move cursor to screen centre — snaps mouse_world to endpoint (0,0).
-        let move_event = make_cursor_event(400.0, 300.0);
+        // Step 1: move cursor near screen centre — raw world (5,0), endpoint (0,0) is
+        // 5px away (within 12px aperture). Snapped must correct to (0,0).
+        // If snap is broken, we'd get (5,0) and the test fails.
+        let move_event = make_cursor_event(405.0, 300.0);
         mapper.handle_event(&move_event, &camera, &mut snap_engine, &world, &mut spatial);
 
         // Step 2: click — should emit Click action with already-snapped coords.
@@ -496,10 +498,10 @@ mod tests {
         ));
         spatial.rebuild(&world);
 
-        // Screen centre (400,300) maps to world (0,0) at zoom=1.
-        // The line endpoint at (0,0) should be within the 12px aperture,
-        // so the snap result should be (0,0) with source entity.
-        let event = make_cursor_event(400.0, 300.0);
+        // Screen (405,300) maps to raw world (5,0) at zoom=1.
+        // The line endpoint (0,0) is 5px away in screen-space (within 12px aperture).
+        // If snap is broken, we'd get (5,0) and the test fails.
+        let event = make_cursor_event(405.0, 300.0);
         let actions = mapper.handle_event(
             &event,
             &camera,
