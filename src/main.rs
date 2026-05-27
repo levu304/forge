@@ -1,4 +1,4 @@
-//! Forge v0.1.0 — Entry point and winit event loop.
+//! Forge v0.2.0 — Entry point and winit event loop.
 //!
 //! Initialises structured logging, creates the window and `ForgeApp`,
 //! then runs the winit [`ApplicationHandler`] event loop.
@@ -74,7 +74,7 @@ impl ApplicationHandler for ForgeAppHandler {
         }
 
         let window_attributes = winit::window::WindowAttributes::default()
-            .with_title("Forge v0.1.0")
+            .with_title("Forge v0.2.0")
             .with_inner_size(LogicalSize::new(1280, 720));
 
         let window = match event_loop.create_window(window_attributes) {
@@ -95,7 +95,7 @@ impl ApplicationHandler for ForgeAppHandler {
         if let Some(state) = &self.state {
             state.window.request_redraw();
         }
-        tracing::info!("Forge v0.1.0 ready");
+        tracing::info!("Forge v0.2.0 ready");
     }
 
     // ── window_event ──────────────────────────────────────────────────────
