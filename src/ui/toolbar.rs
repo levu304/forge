@@ -100,6 +100,8 @@ mod tests {
         assert!(arc.max.y <= pline.min.y, "ARC overlaps PLINE");
     }
 
+    // -- Draw command dispatch -----------------------------------------------
+
     #[test]
     fn click_line_dispatches_command() {
         let mut harness = new_harness();
@@ -130,5 +132,141 @@ mod tests {
         harness.get_by_label("PLINE").click();
         harness.run();
         assert_eq!(harness.state().pending_dispatch.as_deref(), Some("PLINE"));
+    }
+
+    // -- Modify command button existence -------------------------------------
+
+    #[test]
+    fn modify_buttons_exist() {
+        let mut harness = new_harness();
+        harness.run();
+        for &label in &["ERASE", "MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "OFFSET"] {
+            let node = harness.get_by_label(label);
+            let r = node.rect();
+            assert!(r.size().x > 0.0 && r.size().y > 0.0, "Button '{label}' should be visible (rect: {r:?})");
+        }
+    }
+
+    // -- Modify command dispatch ---------------------------------------------
+
+    #[test]
+    fn click_erase_dispatches_modify_command() {
+        let mut harness = new_harness();
+        harness.get_by_label("ERASE").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::Erase),
+        );
+    }
+
+    #[test]
+    fn click_move_dispatches_modify_command() {
+        let mut harness = new_harness();
+        harness.get_by_label("MOVE").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::Move),
+        );
+    }
+
+    #[test]
+    fn click_copy_dispatches_modify_command() {
+        let mut harness = new_harness();
+        harness.get_by_label("COPY").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::Copy),
+        );
+    }
+
+    #[test]
+    fn click_rotate_dispatches_modify_command() {
+        let mut harness = new_harness();
+        harness.get_by_label("ROTATE").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::Rotate),
+        );
+    }
+
+    #[test]
+    fn click_scale_dispatches_modify_command() {
+        let mut harness = new_harness();
+        harness.get_by_label("SCALE").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::Scale),
+        );
+    }
+
+    #[test]
+    fn click_mirror_dispatches_modify_command() {
+        let mut harness = new_harness();
+        harness.get_by_label("MIRROR").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::Mirror),
+        );
+    }
+
+    #[test]
+    fn click_offset_dispatches_modify_command() {
+        let mut harness = new_harness();
+        harness.get_by_label("OFFSET").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::Offset),
+        );
+    }
+
+    // -- Interaction: draw + modify together ----------------------------------
+
+    #[test]
+    fn draw_then_modify_buttons_both_work() {
+        let mut harness = new_harness();
+        // Click LINE
+        harness.get_by_label("LINE").click();
+        harness.run();
+        assert_eq!(harness.state().pending_dispatch.as_deref(), Some("LINE"));
+
+        // Click ERASE (now pending_modify_command is set)
+        harness.get_by_label("ERASE").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::Erase),
+        );
+        // pending_dispatch should still be "LINE" (not cleared by modify button)
+        assert_eq!(harness.state().pending_dispatch.as_deref(), Some("LINE"));
+    }
+
+    // -- Button rect ordering for modify commands ----------------------------
+
+    #[test]
+    fn modify_button_rects_are_disjoint_and_ordered() {
+        let mut harness = new_harness();
+        harness.run();
+
+        let erase = harness.get_by_label("ERASE").rect();
+        let mv = harness.get_by_label("MOVE").rect();
+        let copy = harness.get_by_label("COPY").rect();
+        let rotate = harness.get_by_label("ROTATE").rect();
+        let scale = harness.get_by_label("SCALE").rect();
+        let mirror = harness.get_by_label("MIRROR").rect();
+        let offset = harness.get_by_label("OFFSET").rect();
+
+        assert!(erase.max.y <= mv.min.y, "ERASE overlaps MOVE");
+        assert!(mv.max.y <= copy.min.y, "MOVE overlaps COPY");
+        assert!(copy.max.y <= rotate.min.y, "COPY overlaps ROTATE");
+        assert!(rotate.max.y <= scale.min.y, "ROTATE overlaps SCALE");
+        assert!(scale.max.y <= mirror.min.y, "SCALE overlaps MIRROR");
+        assert!(mirror.max.y <= offset.min.y, "MIRROR overlaps OFFSET");
     }
 }
