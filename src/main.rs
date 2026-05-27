@@ -206,15 +206,19 @@ impl ApplicationHandler for ForgeAppHandler {
             .process_pending_cancel(&mut state.app.world);
 
         // ── 1. Let egui consume events first (UI priority) ────────────────
-        let egui_consumed = state
+        let response = state
             .app
             .ui_system
             .egui_state
-            .on_window_event(&state.window, &event)
-            .consumed;
+            .on_window_event(&state.window, &event);
 
-        if egui_consumed {
+        // egui signals repaint:true for CursorMoved even when event isn't
+        // consumed — honoring this ensures hover states update immediately
+        // before we run the snap pipeline below.
+        if response.repaint || response.consumed {
             state.window.request_redraw();
+        }
+        if response.consumed {
             return;
         }
 
