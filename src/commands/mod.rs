@@ -53,6 +53,23 @@ pub enum CommandResult {
     Cancelled,                // User cancelled
 }
 
+/// Enum for toolbar-dispatched modify commands that bypass the text parser.
+///
+/// The toolbar sets [`CommandState::pending_modify_command`] directly; the
+/// event loop dispatches it via [`ForgeApp::dispatch_modify_command`] which
+/// constructs the concrete command with access to `SelectionManager`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PendingModifyCommand {
+    #[default]
+    Erase,
+    Move,
+    Copy,
+    Rotate,
+    Scale,
+    Mirror,
+    Offset,
+}
+
 /// Manages the active command and command history.
 #[derive(Default)]
 pub struct CommandState {
@@ -61,6 +78,10 @@ pub struct CommandState {
     pub buffer: String,       // Current command-line text
     pub last_error: Option<String>, // Most recent command error (displayed in UI)
     pub pending_dispatch: Option<String>, // Text waiting to be dispatched from UI command line
+
+    /// Toolbar-dispatched modify command waiting for activation.
+    /// Consumed by the event-loop handler which has access to `SelectionManager`.
+    pub pending_modify_command: Option<PendingModifyCommand>,
 
     /// Set to `true` by the UI when Escape is pressed with an active command.
     /// Consumed by the event-loop layer (which has `&mut World`) to call

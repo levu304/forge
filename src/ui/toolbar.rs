@@ -4,7 +4,7 @@
 //! and modify commands (ERASE, MOVE, COPY, ROTATE, SCALE,
 //! MIRROR, OFFSET).
 
-use crate::commands::CommandState;
+use crate::commands::{CommandState, PendingModifyCommand};
 
 /// Draw the toolbar panel on the left side of the viewport.
 ///
@@ -42,38 +42,42 @@ pub fn draw(ui: &mut egui::Ui, cmd_state: &mut CommandState) {
                 ui.add_space(4.0);
 
                 // ── Modify commands ──────────────────────────────────────
+                // NOTE: These bypass the text parser entirely; they set
+                // `pending_modify_command` which is consumed by the event
+                // loop to construct the concrete command with access to
+                // `SelectionManager`.  (forge-51x: use same enum).
                 if ui.button("ERASE").clicked() {
-                    cmd_state.pending_dispatch = Some("ERASE".into());
+                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Erase);
                 }
                 ui.add_space(4.0);
 
                 if ui.button("MOVE").clicked() {
-                    cmd_state.pending_dispatch = Some("MOVE".into());
+                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Move);
                 }
                 ui.add_space(4.0);
 
                 if ui.button("COPY").clicked() {
-                    cmd_state.pending_dispatch = Some("COPY".into());
+                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Copy);
                 }
                 ui.add_space(4.0);
 
                 if ui.button("ROTATE").clicked() {
-                    cmd_state.pending_dispatch = Some("ROTATE".into());
+                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Rotate);
                 }
                 ui.add_space(4.0);
 
                 if ui.button("SCALE").clicked() {
-                    cmd_state.pending_dispatch = Some("SCALE".into());
+                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Scale);
                 }
                 ui.add_space(4.0);
 
                 if ui.button("MIRROR").clicked() {
-                    cmd_state.pending_dispatch = Some("MIRROR".into());
+                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Mirror);
                 }
                 ui.add_space(4.0);
 
                 if ui.button("OFFSET").clicked() {
-                    cmd_state.pending_dispatch = Some("OFFSET".into());
+                    cmd_state.pending_modify_command = Some(PendingModifyCommand::Offset);
                 }
             });
         });

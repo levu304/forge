@@ -152,6 +152,13 @@ impl ApplicationHandler for ForgeAppHandler {
             state.app.dispatch_command_text(&text);
         }
 
+        // ── Dispatch pending modify command from toolbar buttons ────────
+        // This bypasses the text parser, constructing the concrete command
+        // directly with access to SelectionManager (forge-51x fix).
+        if let Some(cmd_type) = state.app.command_state.pending_modify_command.take() {
+            state.app.dispatch_modify_command(cmd_type);
+        }
+
         // ── Process pending cancel requests (set by egui Escape handler) ──
         state
             .app

@@ -22,7 +22,10 @@ use std::sync::Arc;
 use winit::window::Window;
 
 use crate::commands::{
-    self, line_cmd::LineCommand, Command, CommandInput, CommandResult, CommandState,
+    self, copy_cmd::CopyCommand, erase_cmd::EraseCommand, line_cmd::LineCommand,
+    mirror_cmd::MirrorCommand, move_cmd::MoveCommand, offset_cmd::OffsetCommand,
+    rotate_cmd::RotateCommand, scale_cmd::ScaleCommand,
+    Command, CommandInput, CommandResult, CommandState, PendingModifyCommand,
 };
 use crate::ecs::resources::{CameraState, GridConfig, SnapConfig};
 use crate::geometry::Point2D;
@@ -484,6 +487,79 @@ impl ForgeApp {
                 // if switching to streaming parsers in v0.2.0+.
             }
         }
+    }
+
+    /// Dispatch a toolbar modify command, bypassing the text parser.
+    ///
+    /// Consumed by the event loop from [`CommandState::pending_modify_command`].
+    /// Constructs the concrete command using `SelectionManager`, checks for
+    /// empty selection, and activates it if valid.
+    pub fn dispatch_modify_command(&mut self, cmd_type: PendingModifyCommand) {
+        /// Helper: if the selection is empty, set an error and return `Err`.
+        fn require_selection(sel: &SelectionManager, name: &str) -> Result<(), String> {
+            if sel.is_empty() {
+                Err(format!(
+                    "No entities selected. Select objects before running {name}."
+                ))
+            } else {
+                Ok(())
+            }
+        }
+
+        let cmd: Box<dyn Command> = match cmd_type {
+            PendingModifyCommand::Erase => {
+                if let Err(msg) = require_selection(&self.selection_manager, "ERASE") {
+                    self.command_state.last_error = Some(msg);
+                    return;
+                }
+                Box::new(EraseCommand::new(&self.selection_manager))
+            }
+            PendingModifyCommand::Move => {
+                if let Err(msg) = require_selection(&self.selection_manager, "MOVE") {
+                    self.command_state.last_error = Some(msg);
+                    return;
+                }
+                Box::new(MoveCommand::new(&self.selection_manager))
+            }
+            PendingModifyCommand::Copy => {
+                if let Err(msg) = require_selection(&self.selection_manager, "COPY") {
+                    self.command_state.last_error = Some(msg);
+                    return;
+                }
+                Box::new(CopyCommand::new(&self.selection_manager))
+            }
+            PendingModifyCommand::Rotate => {
+                if let Err(msg) = require_selection(&self.selection_manager, "ROTATE") {
+                    self.command_state.last_error = Some(msg);
+                    return;
+                }
+                Box::new(RotateCommand::new(&self.selection_manager))
+            }
+            PendingModifyCommand::Scale => {
+                if let Err(msg) = require_selection(&self.selection_manager, "SCALE") {
+                    self.command_state.last_error = Some(msg);
+                    return;
+                }
+                Box::new(ScaleCommand::new(&self.selection_manager))
+            }
+            PendingModifyCommand::Mirror => {
+                if let Err(msg) = require_selection(&self.selection_manager, "MIRROR") {
+                    self.command_state.last_error = Some(msg);
+                    return;
+                }
+                Box::new(MirrorCommand::new(&self.selection_manager))
+            }
+            PendingModifyCommand::Offset => {
+                if let Err(msg) = require_selection(&self.selection_manager, "OFFSET") {
+                    self.command_state.last_error = Some(msg);
+                    return;
+                }
+                Box::new(OffsetCommand::new(&self.selection_manager))
+            }
+        };
+
+        self.command_state.active = Some(cmd);
+        self.command_state.last_error = None;
     }
 
     /// Attempt to recover from a GPU device loss by recreating the entire
