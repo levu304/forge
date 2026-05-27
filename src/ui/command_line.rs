@@ -102,6 +102,12 @@ pub fn draw(ui: &mut egui::Ui, cmd_state: &mut CommandState) {
                     {
                         cmd_state.pending_dispatch = Some(text);
                         cmd_state.buffer.clear();
+                    } else if cmd_state.active.is_some() {
+                        // Buffer is empty but a command is active — send an
+                        // empty dispatch signal so dispatch_command_text()
+                        // can forward it as CommandInput::Confirm.
+                        cmd_state.pending_dispatch = Some(String::new());
+                        cmd_state.buffer.clear();
                     }
                 }
 

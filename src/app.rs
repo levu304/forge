@@ -29,7 +29,7 @@ use crate::commands::{
 };
 use crate::ecs::resources::{CameraState, GridConfig, SnapConfig};
 use crate::geometry::Point2D;
-use crate::history::History;
+use crate::history::{History, Transaction};
 use crate::input::InputMapper;
 use crate::render::RenderState;
 use crate::selection::{window_select::WindowSelectState, SelectionManager};
@@ -421,6 +421,43 @@ impl ForgeApp {
         output.present();
     }
 
+    /// Process a terminal command result and update state accordingly.
+    ///
+    /// Called after extracting the optional [`Transaction`] from the command
+    /// via [`Command::take_transaction`].  The caller must have already
+    /// extracted the transaction before calling this method.
+    ///
+    /// | Result      | Clears active? | Pushes to history? |
+    /// |-------------|----------------|--------------------|
+    /// | `Complete`  | Yes            | Yes (if tx exists) |
+    /// | `Cancelled` | Yes            | No                 |
+    /// | `Error`     | No             | No                 |
+    /// | `Continue`  | No             | No                 |
+    pub fn handle_command_result(&mut self, result: CommandResult, transaction: Option<Transaction>) {
+        match result {
+            CommandResult::Complete => {
+                if let Some(tx) = transaction {
+                    self.history.push(tx);
+                }
+                self.command_state.active = None;
+                self.command_state.last_error = None;
+            }
+            CommandResult::Cancelled => {
+                self.command_state.active = None;
+                self.command_state.last_error = None;
+            }
+            CommandResult::Error(msg) => {
+                tracing::warn!("Command error: {}", msg);
+                self.command_state.last_error = Some(msg);
+                // active is NOT cleared — command may continue after error
+                // (e.g. "Invalid input. Specify a point.")
+            }
+            CommandResult::Continue => {
+                // Non-terminal — active stays, no state change needed.
+            }
+        }
+    }
+
     /// Dispatch text from the UI command line to the command system.
     ///
     /// The text buffer is parsed and either:
@@ -436,34 +473,33 @@ impl ForgeApp {
     /// `last_error`.
     pub fn dispatch_command_text(&mut self, text: &str) {
         // ── Active command: feed text as input ───────────────────────────
-        if let Some(ref mut cmd) = self.command_state.active {
+        if self.command_state.active.is_some() {
             let trimmed = text.trim();
 
-            let input = if let Ok((_, point)) = commands::parser::parse_point(trimmed) {
+            let input = if trimmed.is_empty() {
+                // Empty dispatch from the command line while a command is
+                // active → treat as Confirm (e.g. pressing Enter after
+                // placing enough points via mouse clicks).
+                Some(CommandInput::Confirm)
+            } else if let Ok((_, point)) = commands::parser::parse_point(trimmed) {
                 Some(CommandInput::Point(point))
             } else {
                 Some(CommandInput::Text(trimmed.to_string()))
             };
 
             if let Some(input) = input {
-                let result = cmd.on_input(input, &mut self.world);
-                match result {
-                    CommandResult::Complete => {
-                        if let Some(tx) = cmd.take_transaction() {
-                            self.history.push(tx);
-                        }
-                        self.command_state.active = None;
-                        self.command_state.last_error = None;
-                    }
-                    CommandResult::Cancelled => {
-                        self.command_state.active = None;
-                        self.command_state.last_error = None;
-                    }
-                    CommandResult::Error(msg) => {
-                        tracing::warn!("Command error: {}", msg);
-                        self.command_state.last_error = Some(msg);
-                    }
-                    _ => {}
+                // Extract result + transaction inside a scope so the
+                // mutable borrow of command_state.active ends before
+                // handle_command_result borrows self again.
+                let outcome;
+                if let Some(ref mut cmd) = self.command_state.active {
+                    let result = cmd.on_input(input, &mut self.world);
+                    outcome = Some((result, cmd.take_transaction()));
+                } else {
+                    outcome = None;
+                }
+                if let Some((result, tx)) = outcome {
+                    self.handle_command_result(result, tx);
                 }
             }
             return;
