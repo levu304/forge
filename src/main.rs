@@ -355,7 +355,18 @@ impl ApplicationHandler for ForgeAppHandler {
 
     // ── about_to_wait (continuous rendering) ──────────────────────────────
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(state) = &self.state {
+        if let Some(state) = &mut self.state {
+            // ── Drain pending command-line dispatch ───────────────────────
+            // The command_line draw function (called during render) sets
+            // pending_dispatch when the user presses Enter in the egui text
+            // field while a command is active.  But RedrawRequested events
+            // return before reaching line ~191 where pending_dispatch is
+            // normally consumed.  Processing it here, between frames, closes
+            // that gap — the dispatch is consumed on the very next frame.
+            if let Some(text) = state.app.command_state.pending_dispatch.take() {
+                state.app.dispatch_command_text(&text);
+            }
+
             // Continuous rendering: request redraw on every idle frame.
             // This keeps the viewport at the display's refresh rate.
             //
