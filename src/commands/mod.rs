@@ -33,6 +33,22 @@ pub trait Command {
     fn on_cancel(&mut self, world: &mut World);
     /// Render preview geometry (e.g., rubber-band line).
     fn preview(&self) -> Vec<PreviewEntity>;
+
+    /// Take the transaction produced after command completion, if any.
+    ///
+    /// The caller must call this after the command returns
+    /// [`CommandResult::Complete`] and push the result onto the
+    /// [`History`](crate::history::History) stack so that undo/redo
+    /// can replay the operation.
+    ///
+    /// Default panic — commands that return [`CommandResult::Complete`]
+    /// MUST override this method.  Commands that never complete (stubs)
+    /// should override with `None`.
+    fn take_transaction(&mut self) -> Option<crate::history::Transaction> {
+        unimplemented!(
+            "take_transaction() must be overridden by commands that return Complete"
+        )
+    }
 }
 
 pub enum CommandInput {

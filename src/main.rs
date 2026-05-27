@@ -29,6 +29,7 @@ use winit::{
 
 use forge::app::ForgeApp;
 use forge::commands::{CommandInput, CommandResult};
+use forge::history::apply_entity_remapping;
 use forge::input::{apply_camera_action, InputAction};
 use forge::selection::window_select::WindowSelectState;
 
@@ -144,6 +145,45 @@ impl ApplicationHandler for ForgeAppHandler {
                 state.app.render(&state.window);
                 return;
             }
+            // ── Undo/Redo keyboard shortcuts (before egui) ─────────────
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == winit::event::ElementState::Pressed =>
+            {
+                use winit::keyboard::{KeyCode, PhysicalKey};
+                let ctrl = state.app.input_mapper.state.ctrl;
+                let wants_keyboard = state.app.ui_system.egui_ctx.egui_wants_keyboard_input();
+                if !wants_keyboard && ctrl {
+                    match event.physical_key {
+                        PhysicalKey::Code(KeyCode::KeyZ) => {
+                            let label = state.app.history.undo(&mut state.app.world);
+                            if let Some(_label) = label {
+                                let mapping = state.app.history.take_entity_mapping();
+                                apply_entity_remapping(
+                                    &mut state.app.selection_manager,
+                                    &mut state.app.spatial_index,
+                                    &mapping,
+                                );
+                                state.window.request_redraw();
+                            }
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::KeyY) => {
+                            let label = state.app.history.redo(&mut state.app.world);
+                            if let Some(_label) = label {
+                                let mapping = state.app.history.take_entity_mapping();
+                                apply_entity_remapping(
+                                    &mut state.app.selection_manager,
+                                    &mut state.app.spatial_index,
+                                    &mapping,
+                                );
+                                state.window.request_redraw();
+                            }
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -195,6 +235,10 @@ impl ApplicationHandler for ForgeAppHandler {
                             cmd.on_input(CommandInput::Point(point), &mut state.app.world);
                         match result {
                             CommandResult::Complete => {
+                                // Extract transaction for history before dropping cmd.
+                                if let Some(tx) = cmd.take_transaction() {
+                                    state.app.history.push(tx);
+                                }
                                 state.app.command_state.active = None;
                                 state.app.command_state.last_error = None;
                             }
@@ -209,10 +253,14 @@ impl ApplicationHandler for ForgeAppHandler {
                             _ => {}
                         }
                     } else {
-                        // No active command: start window select drag,
-                        // recording the screen-space start position so the
-                        // selection mode (enclosing vs crossing) can be
-                        // determined from drag direction on release.
+                        // No active command: request GPU picking AND start
+                        // window select drag.
+                        state.app.needs_picking = true;
+                        if let Some(ref mut picking_pass) = state.app.render_state.picking_pass {
+                            let screen = state.app.input_mapper.state.mouse_screen;
+                            picking_pass
+                                .request_pick_at((screen.0 as u32, screen.1 as u32));
+                        }
                         let screen = state.app.input_mapper.state.mouse_screen;
                         state.app.window_select_state =
                             Some(WindowSelectState::new(point, point, (screen.0 as f64, screen.1 as f64)));
@@ -253,6 +301,12 @@ impl ApplicationHandler for ForgeAppHandler {
         // ── 3. Window select: finalize on left release ─────────────────
         // When left_down becomes false while window_select_state is active,
         // query the spatial index and apply the selection.
+        //
+        // Only cancels GPU picking when the user actually dragged (entities
+        // found).  A click-without-drag (zero-area rect) lets the picking
+        // pass resolve naturally on the next frame, enabling single-click
+        // selection.  (Fixes PR #32 review issue #1 — picking cancelled by
+        // window select.)
         if state.app.window_select_state.is_some()
             && !state.app.input_mapper.state.left_down
         {
@@ -266,13 +320,26 @@ impl ApplicationHandler for ForgeAppHandler {
             // is the only other caller of ensure_clean.
             state.app.spatial_index.ensure_clean(&state.app.world);
             let entities = ws.query(&state.app.spatial_index);
-            // Replace current selection with window-select results.
-            state.app.selection_manager.clear(&mut state.app.world);
-            for entity in entities {
-                state.app
-                    .selection_manager
-                    .select(&mut state.app.world, entity);
+
+            if !entities.is_empty() {
+                // User actually dragged — window select replaces selection.
+                state.app.selection_manager.clear(&mut state.app.world);
+                for entity in entities {
+                    state.app
+                        .selection_manager
+                        .select(&mut state.app.world, entity);
+                }
+                // Cancel any pending GPU picking request — window selection
+                // takes precedence over single-click picking.
+                // Also clear needs_picking to avoid a wasted GPU pass.
+                if let Some(ref mut p) = state.app.render_state.picking_pass {
+                    p.cancel_pick();
+                }
+                state.app.needs_picking = false;
             }
+            // Click-without-drag: leave selection and picking alone.
+            // The picking pass will resolve on the next frame, and
+            // `handle_picking_result` in the render loop will apply it.
             state.window.request_redraw();
         }
 

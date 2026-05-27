@@ -5,6 +5,86 @@ All notable changes to the Forge project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-05-27
+
+### Added
+
+#### Selection System
+- `SelectionManager` with `HashSet<hecs::Entity>` + `Selected` marker component sync.
+- Single-click selection with GPU picking (entity ID framebuffer readback via
+  `Rgba32Uint` offscreen texture, two-phase async protocol).
+- Window selection: left-drag with enclosing (blue, left→right) and crossing
+  (green, right→left) modes, querying the spatial index.
+- Selection visual feedback: per-instance `is_selected` attribute tinting entities
+  blue, plus translucent selection rectangle renderer.
+
+#### Snap Engine
+- 7 snap types: Endpoint, Midpoint, Center, Nearest, Perpendicular, Tangent, Grid.
+- `SnapCandidate` trait with per-entity-type candidate generation (Line, Circle,
+  Arc, Polyline).
+- Tolerance filtering and priority ranking (Endpoint highest, Nearest lowest).
+- Screen-space billboard markers (yellow): square (Endpoint), triangle (Midpoint),
+  circle (Center), crosshair (Nearest/Perpendicular/Tangent/Grid).
+- Snap integration with `InputMapper` — world coordinates are snapped before
+  any action is emitted.
+
+#### Spatial Index (rstar 0.12)
+- `SpatialIndex` wrapping `rstar::RTree<SpatialEntry>` with nearest-neighbor,
+  enclosed-in, and intersecting queries.
+- Lazy rebuild via `dirty` flag for batch entity modifications.
+- `BoundingBox2D`-based envelopes for all geometry types.
+
+#### History (Undo/Redo)
+- `History` with undo/redo stacks (`VecDeque<Transaction>`), configurable depth
+  (default 1000), and standard branching semantics.
+- `Transaction` with human-readable label + list of `AtomicOp`s.
+- `AtomicOp` enum covering Spawn, Despawn, and Set variants for all entity types
+  (Line, Circle, Arc, Polyline, Position).
+- `EntityMapping` for stale handle remapping after entity re-spawn during undo/redo.
+- `apply_entity_remapping()` to fix up `SelectionManager` and `SpatialIndex` after
+  undo/redo cycles.
+- Ctrl+Z (undo) and Ctrl+Y (redo) keyboard shortcuts, guarded against egui focus.
+
+#### Modify Commands
+- **ERASE** — removes selected entities with `Despawn*` transaction.
+- **MOVE** — displaces selected entities by a vector, two-point interaction.
+- **COPY** — spawns duplicates at offset, updates selection to new entities.
+- **ROTATE** — rotates entities around a base point by a specified angle.
+- **SCALE** — scales entities around a base point by a factor.
+- **MIRROR** — reflects entities across a user-specified mirror line.
+- **OFFSET** — creates parallel lines/concentric circles at a distance.
+- All commands implement the `Command` trait, build `Transaction`s for history,
+  and integrate with snap engine for point input.
+- Toolbar buttons for all 7 modify commands.
+
+#### Rendering Updates
+- Per-instance `is_selected` vertex attribute for selection tint (avoids uniform
+  buffer bloat per-entity).
+- Dedicated picking WGSL shader (`picking.wgsl`) with flat `u32` entity ID output.
+- `PickingPass` with offscreen `Rgba32Uint` texture, two-phase async readback,
+  and per-entity vertex generation.
+- `SnapMarkerRenderer` with 3 pipelines (TriangleStrip/TriangleList/LineList) and
+  pre-computed billboard geometries.
+- `WindowSelectRenderer` with translucent fill + border per mode.
+- Updated entity WGSL shader with `mix()` selection tint.
+
+#### Integration
+- Full event-loop wiring: picking lifecycle, window select drag, snap integration
+  in `InputMapper`, command dispatch, undo/redo shortcuts.
+- Status bar: active snap type indicators (yellow labels) and selection count.
+- Toolbar: modify command buttons for ERASE, MOVE, COPY, ROTATE, SCALE, MIRROR,
+  OFFSET.
+- `ForgeApp` owns all new subsystems (`SelectionManager`, `SnapEngine`,
+  `SpatialIndex`, `History`) with initialization in `new()`.
+- `rstar = "0.12.2"` dependency added.
+
+### Deferred to v0.3.0+
+- Ctrl+click multi-select modifier.
+- Grip editing (stretch via handles).
+- Layer system.
+- Incremental spatial index updates (full rebuild is acceptable for v0.2.0).
+- OFFSET with polyline corner trimming and self-intersection handling.
+
 ## [0.1.0] — 2026-05-23
 
 ### Added

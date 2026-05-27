@@ -153,6 +153,29 @@ impl ForgeApp {
     /// 5. egui UI pass (overlay — `LoadOp::Load`).
     /// 6. Submit command encoder and present.
     pub fn render(&mut self, window: &Window) {
+        // ── 0. Resolve previous frame's picking result (if any) ──────────
+        // The picking pass renders entity IDs to an offscreen buffer during
+        // this frame's render (see §4b below). The result is read back on the
+        // *next* frame via `resolve_pick`. We always try here; `resolve_pick`
+        // is a no-op if no pick request is pending.
+        //
+        // IMPORTANT: `resolve_pick` returns `None` for two different states:
+        //   (a) no pick request was pending → `had_pending` is false → skip
+        //   (b) pick resolved to empty space (sentinel 0xFFFFFFFF) →
+        //       `had_pending` is true → call handle_picking_result(None)
+        //       to deselect all.  (Fixes PR #32 review issue #2.)
+        if let Some(ref mut picking_pass) = self.render_state.picking_pass {
+            let had_pending = picking_pass.pending_coords().is_some();
+            if let Some(entity) = picking_pass.resolve_pick(&self.render_state.device) {
+                self.selection_manager
+                    .handle_picking_result(&mut self.world, Some(entity));
+            } else if had_pending {
+                // Pick resolved but no entity under cursor → clear selection.
+                self.selection_manager
+                    .handle_picking_result(&mut self.world, None);
+            }
+        }
+
         // ── 1. Acquire surface texture ───────────────────────────────────
         // wgpu 29: get_current_texture() returns CurrentSurfaceTexture enum
         // (not a Result).  Variants:
@@ -250,7 +273,33 @@ impl ForgeApp {
             );
         }
 
-        // ── 4. Entity pass (LoadOp::Load — grid already cleared) ─────────
+        // ── 4a. Window select rect (on top of grid, below entities) ──────
+        if let Some(ref ws) = self.window_select_state {
+            self.render_state.window_select_renderer.render(
+                &mut encoder,
+                &view,
+                ws,
+                &self.render_state.camera_bind_group,
+                &self.render_state.queue,
+            );
+        }
+
+        // ── 4b. Picking pass (draw entity IDs — only when requested) ─────
+        if self.needs_picking {
+            if let Some(ref mut picking_pass) = self.render_state.picking_pass {
+                picking_pass.render(
+                    &mut encoder,
+                    &self.world,
+                    &self.render_state.camera_bind_group,
+                    &self.render_state.queue,
+                    &self.render_state.device,
+                    self.resources.camera.zoom,
+                );
+            }
+            self.needs_picking = false;
+        }
+
+        // ── 4c. Entity pass (LoadOp::Load — grid already cleared) ─────────
         self.render_state.entity_renderer.render(
             &mut encoder,
             &view,
@@ -260,6 +309,20 @@ impl ForgeApp {
             &self.render_state.queue,
             &self.render_state.device,
         );
+
+        // ── 4d. Snap marker (on top of entities, below UI) ─────────────────
+        if let Some(ref snap_result) = self.snap_engine.last_result {
+            if let Some(ref marker_renderer) = self.render_state.snap_marker_renderer {
+                marker_renderer.render(
+                    &mut encoder,
+                    &view,
+                    snap_result,
+                    &self.render_state.camera_bind_group,
+                    &self.resources.camera,
+                    &self.render_state.queue,
+                );
+            }
+        }
 
         // ── 5. UI pass (egui overlay) ────────────────────────────────────
         let ui_output = self.ui_system.run(
@@ -386,6 +449,9 @@ impl ForgeApp {
                 let result = cmd.on_input(input, &mut self.world);
                 match result {
                     CommandResult::Complete => {
+                        if let Some(tx) = cmd.take_transaction() {
+                            self.history.push(tx);
+                        }
                         self.command_state.active = None;
                         self.command_state.last_error = None;
                     }
@@ -457,6 +523,9 @@ impl ForgeApp {
                     let result = cmd.on_input(CommandInput::Confirm, &mut self.world);
                     match result {
                         CommandResult::Complete => {
+                            if let Some(tx) = cmd.take_transaction() {
+                                self.history.push(tx);
+                            }
                             self.command_state.last_error = None;
                         }
                         CommandResult::Cancelled => {
