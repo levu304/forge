@@ -1,0 +1,4 @@
+- Read `.docs/Forge_Brainstorming.md` to understand the project's brainstorming process and goals
+- Read `.docs/ROADMAP.md` to understand the project's roadmap and goals
+- Read specs in `.docs/.specs` to understand the project's design and requirements
+- Read implementation plans in `.docs/.plans` before implementing

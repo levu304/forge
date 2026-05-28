@@ -4,8 +4,4 @@
   "watcher": {
     "ignore": ["target/**"],
   },
-  "instructions": [
-    ".docs/.specs/v0.2.0.md",
-    ".docs/.plans/v0.2.0-implementation-plan.md",
-  ],
 }
