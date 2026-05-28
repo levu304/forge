@@ -51,6 +51,7 @@ pub enum InputAction {
 ///
 /// Maintains the current [`InputState`] snapshot and tracks the last
 /// mouse position for computing pan deltas during middle-button drag.
+#[derive(Default)]
 pub struct InputMapper {
     /// Current input state (mouse position, button states, modifiers).
     pub state: InputState,
@@ -186,7 +187,7 @@ impl InputMapper {
                     // PixelDelta follows screen convention: positive Y = scroll DOWN.
                     // LineDelta uses logical convention: positive Y = scroll UP.
                     // Negate PixelDelta so both produce consistent Zoom delta direction.
-                    MouseScrollDelta::PixelDelta(pos) => -pos.y as f64 / 100.0,
+                    MouseScrollDelta::PixelDelta(pos) => -pos.y / 100.0,
                 };
                 // Defensive clamp: limits zoom to ~2.6× per event (1.1^10 ≈ 2.59).
                 // Prevents extreme zoom from buggy drivers or synthetic events.

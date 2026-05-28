@@ -243,11 +243,41 @@ impl Default for SelectionConfig {
     }
 }
 
-/// Layer table resource stub (full implementation in Step 3).
+/// Layer table ECS resource (stub — full implementation in Step 3).
+///
+/// Eventually this will be a `HashMap<u32, LayerDef>` supporting CRUD
+/// operations on named layers (freeze, lock, color, lineweight,
+/// plot/no-plot).  For now it is a unit marker — the resource is
+/// registered in the ECS world so that subsystems (render, snap,
+/// selection) can request it and receive a non-empty `Some(...)`
+/// response once the real implementation lands.
+///
+/// # Planned API (Step 3)
+///
+/// ```text
+/// create_layer(name, color, lineweight) -> LayerId
+/// delete_layer(id)
+/// set_active(id)
+/// layer_count() -> usize
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct LayerTable;
 
-/// Block table resource stub (full implementation in Step 6).
+/// Block table ECS resource (stub — full implementation in Step 6).
+///
+/// Eventually this will be a `HashMap<u32, BlockDef>` supporting CRUD
+/// operations on block definitions (named collections of entities that
+/// can be instanced as BlockRef components).  For now it is a unit
+/// marker — its presence in the world signals that the block subsystem
+/// is ready, and queries against it will return `Some(...)`.
+///
+/// # Planned API (Step 6)
+///
+/// ```text
+/// define_block(name, entities) -> BlockId
+/// insert_block_instance(id, transform) -> Entity
+/// explode(entity)
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct BlockTable;
 

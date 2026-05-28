@@ -175,7 +175,7 @@ impl RotateCommand {
             };
             Some((AtomicOpValue::Arc(old), AtomicOpValue::Arc(new)))
         } else if let Ok(data) = world.get::<&PolylineData>(entity) {
-            let old: PolylineData = (&*data).clone();
+            let old: PolylineData = PolylineData::clone(&*data);
             let new = PolylineData {
                 vertices: old.vertices.iter()
                     .map(|v| Self::rotate_point(*v, center, cos_a, sin_a))

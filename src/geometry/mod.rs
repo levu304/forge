@@ -1,7 +1,7 @@
 //! Math & geometric types.
 //!
 //! CAD-grade 2D geometry types including Point2D, BoundingBox2D,
-//! Vector2D (reserved), and Transform2D (reserved).
+//! Transform2D, Vector2D (reserved), and CubicBezier.
 
 /// Domain-appropriate geometric tolerance for floating-point comparisons.
 ///
@@ -13,9 +13,11 @@ pub const GEOMETRIC_EPSILON: f64 = 1e-12;
 
 pub mod point;
 pub mod vector;    // reserved — v0.2.0+ transforms
-pub mod transform; // reserved — v0.2.0+
+pub mod transform;
 pub mod bounds;
-pub mod spline; // reserved — v0.3.0+ cubic Bézier curves
+pub mod spline;
 
 pub use point::Point2D;
 pub use bounds::BoundingBox2D;
+pub use transform::Transform2D;
+pub use spline::CubicBezier;

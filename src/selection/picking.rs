@@ -194,7 +194,7 @@ impl PickingPass {
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[vertex_buffer_layout.clone()],
+                    buffers: std::slice::from_ref(&vertex_buffer_layout),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 primitive: wgpu::PrimitiveState {
@@ -476,9 +476,7 @@ impl PickingPass {
     /// mapping is not discarded (it will be regenerated on the next
     /// `render()` call).
     pub fn resolve_pick(&mut self, device: &wgpu::Device) -> Option<hecs::Entity> {
-        if self.pending_result.is_none() {
-            return None;
-        }
+        self.pending_result.as_ref()?;
 
         let slice = self.readback_buffer.slice(..);
 

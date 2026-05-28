@@ -1,2 +1,2 @@
-pub mod layer;
+pub mod definition;
 pub mod table;

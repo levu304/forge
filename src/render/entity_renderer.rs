@@ -16,6 +16,7 @@
 
 use std::collections::HashSet;
 use std::f64::consts::PI;
+use std::slice::from_ref;
 
 use super::EntityRenderer;
 use crate::ecs::components::{
@@ -233,7 +234,7 @@ impl EntityRenderer {
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[vertex_buffer_layout.clone()],
+                    buffers: from_ref(&vertex_buffer_layout),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 primitive: wgpu::PrimitiveState {
@@ -350,6 +351,7 @@ impl EntityRenderer {
     /// * `queue` — Command queue (used for `write_buffer` on the staging buffers).
     /// * `device` — GPU device (used to re-create a staging buffer if it
     ///   needs to grow).
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -593,7 +595,7 @@ impl EntityRenderer {
             return;
         }
 
-        let needed_bytes = (vertices.len() * std::mem::size_of::<V>()) as u64;
+        let needed_bytes = std::mem::size_of_val(vertices) as u64;
 
         if needed_bytes > *capacity {
             // Resize strategy:

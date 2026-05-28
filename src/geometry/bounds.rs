@@ -8,6 +8,72 @@ pub struct BoundingBox2D {
 }
 
 impl BoundingBox2D {
+    /// Create an empty (degenerate) bounding box.
+    ///
+    /// The min point is set to `(f64::MAX, f64::MAX)` and max to
+    /// `(f64::MIN, f64::MIN)`, guaranteeing that `is_empty()` returns
+    /// `true`.  Used as a starting accumulator for `from_points()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use forge::geometry::BoundingBox2D;
+    /// let b = BoundingBox2D::empty();
+    /// assert!(b.is_empty());
+    /// ```
+    pub fn empty() -> Self {
+        Self {
+            min: Point2D::new(f64::MAX, f64::MAX),
+            max: Point2D::new(f64::MIN, f64::MIN),
+        }
+    }
+
+    /// Construct a bounding box from a slice of points.
+    ///
+    /// Returns an empty box if the slice is empty.
+    ///
+    /// # Notes
+    ///
+    /// Uses inline min/max accumulation rather than `union()` because
+    /// single-point boxes (where `min == max`) are considered empty
+    /// by `is_empty()`, which would cause `union()` to discard them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use forge::geometry::{BoundingBox2D, Point2D};
+    /// let pts = vec![
+    ///     Point2D::new(0.0, 0.0),
+    ///     Point2D::new(5.0, 3.0),
+    /// ];
+    /// let b = BoundingBox2D::from_points(&pts);
+    /// assert_eq!(b.min.x, 0.0);
+    /// assert_eq!(b.max.x, 5.0);
+    /// assert_eq!(b.min.y, 0.0);
+    /// assert_eq!(b.max.y, 3.0);
+    /// ```
+    pub fn from_points(points: &[Point2D]) -> Self {
+        let mut iter = points.iter().copied();
+        let first = match iter.next() {
+            Some(p) => p,
+            None => return Self::empty(),
+        };
+        let mut min_x = first.x;
+        let mut min_y = first.y;
+        let mut max_x = first.x;
+        let mut max_y = first.y;
+        for p in iter {
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(p.y);
+        }
+        Self {
+            min: Point2D::new(min_x, min_y),
+            max: Point2D::new(max_x, max_y),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.min.x >= self.max.x || self.min.y >= self.max.y
     }
@@ -180,5 +246,78 @@ mod tests {
         let s = format!("{:?}", bbox);
         assert!(s.contains("BoundingBox2D"));
         assert!(s.contains("1.0"));
+    }
+
+    // ------------------------------------------------------------------
+    // empty()
+    // ------------------------------------------------------------------
+    #[test]
+    fn test_empty_returns_empty() {
+        let b = BoundingBox2D::empty();
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn test_empty_min_greater_than_max() {
+        let b = BoundingBox2D::empty();
+        assert!(b.min.x > b.max.x);
+        assert!(b.min.y > b.max.y);
+    }
+
+    // ------------------------------------------------------------------
+    // from_points()
+    // ------------------------------------------------------------------
+    #[test]
+    fn test_from_points_single_point() {
+        let p = Point2D::new(3.0, 7.0);
+        let b = BoundingBox2D::from_points(&[p]);
+        assert_eq!(b.min.x, 3.0);
+        assert_eq!(b.min.y, 7.0);
+        assert_eq!(b.max.x, 3.0);
+        assert_eq!(b.max.y, 7.0);
+    }
+
+    #[test]
+    fn test_from_points_multiple_points() {
+        let pts = vec![
+            Point2D::new(0.0, 10.0),
+            Point2D::new(5.0, -5.0),
+            Point2D::new(-3.0, 3.0),
+        ];
+        let b = BoundingBox2D::from_points(&pts);
+        assert_eq!(b.min.x, -3.0);
+        assert_eq!(b.min.y, -5.0);
+        assert_eq!(b.max.x, 5.0);
+        assert_eq!(b.max.y, 10.0);
+    }
+
+    #[test]
+    fn test_from_points_empty_slice() {
+        let b = BoundingBox2D::from_points(&[]);
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn test_from_points_negative_coords() {
+        let pts = vec![
+            Point2D::new(-10.0, -10.0),
+            Point2D::new(-1.0, -1.0),
+        ];
+        let b = BoundingBox2D::from_points(&pts);
+        assert_eq!(b.min.x, -10.0);
+        assert_eq!(b.min.y, -10.0);
+        assert_eq!(b.max.x, -1.0);
+        assert_eq!(b.max.y, -1.0);
+    }
+
+    #[test]
+    fn test_from_points_all_same() {
+        let p = Point2D::new(5.0, 5.0);
+        let pts = vec![p, p, p];
+        let b = BoundingBox2D::from_points(&pts);
+        assert_eq!(b.min.x, 5.0);
+        assert_eq!(b.max.x, 5.0);
+        assert_eq!(b.min.y, 5.0);
+        assert_eq!(b.max.y, 5.0);
     }
 }

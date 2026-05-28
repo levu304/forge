@@ -329,7 +329,7 @@ impl History {
     /// The caller must pass this mapping to [`apply_entity_remapping`] to
     /// fix up stale handles in the selection manager and spatial index.
     pub fn take_entity_mapping(&mut self) -> EntityMapping {
-        std::mem::replace(&mut self.entity_map, EntityMapping::new())
+        std::mem::take(&mut self.entity_map)
     }
 
     /// Returns `true` if there are transactions that can be undone.

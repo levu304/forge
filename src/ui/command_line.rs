@@ -17,7 +17,7 @@ const MAX_HISTORY: usize = 1000;
 ///
 /// Returns the active command's prompt, or `"Type command:"` if no
 /// command is active.
-pub fn resolve_prompt(active: Option<&Box<dyn Command>>) -> String {
+pub fn resolve_prompt(active: Option<&dyn Command>) -> String {
     active
         .map(|c| c.prompt())
         .unwrap_or_else(|| "Type command:".to_string())
@@ -80,7 +80,7 @@ pub fn draw(ui: &mut egui::Ui, cmd_state: &mut CommandState) {
         .exact_size(32.0)
         .show_inside(ui, |ui| {
             ui.horizontal(|ui| {
-                let prompt = resolve_prompt(cmd_state.active.as_ref());
+                let prompt = resolve_prompt(cmd_state.active.as_deref());
                 ui.label(prompt);
 
                 // Show last command error in red if present
@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn test_resolve_prompt_active() {
         let cmd: Box<dyn Command> = Box::new(TestCommand);
-        assert_eq!(resolve_prompt(Some(&cmd)), "Enter test value:");
+        assert_eq!(resolve_prompt(Some(cmd.as_ref())), "Enter test value:");
     }
 
     // -- should_submit -- //
