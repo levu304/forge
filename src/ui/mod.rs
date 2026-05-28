@@ -13,6 +13,7 @@ pub mod status_bar;
 pub mod toolbar;
 pub mod command_line;
 pub mod property_panel;
+pub mod layer_panel;
 
 use crate::commands::CommandState;
 use crate::ecs::resources::{CameraState, InputState};

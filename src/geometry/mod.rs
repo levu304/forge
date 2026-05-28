@@ -15,6 +15,7 @@ pub mod point;
 pub mod vector;    // reserved — v0.2.0+ transforms
 pub mod transform; // reserved — v0.2.0+
 pub mod bounds;
+pub mod spline; // reserved — v0.3.0+ cubic Bézier curves
 
 pub use point::Point2D;
 pub use bounds::BoundingBox2D;

@@ -14,6 +14,10 @@ pub mod picking_renderer;
 pub mod selection_renderer;
 pub mod window_select_renderer;
 
+mod linetype_renderer;
+mod block_renderer;
+mod grip_renderer;
+
 use std::sync::Arc;
 
 use winit::dpi::PhysicalSize;

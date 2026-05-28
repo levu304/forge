@@ -243,6 +243,14 @@ impl Default for SelectionConfig {
     }
 }
 
+/// Layer table resource stub (full implementation in Step 3).
+#[derive(Debug, Clone, Default)]
+pub struct LayerTable;
+
+/// Block table resource stub (full implementation in Step 6).
+#[derive(Debug, Clone, Default)]
+pub struct BlockTable;
+
 #[cfg(test)]
 mod tests {
     use super::*;

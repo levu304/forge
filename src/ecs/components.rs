@@ -189,3 +189,44 @@ pub struct Selected;
 /// Reserved for v0.2.0 snap candidate filtering.
 #[derive(Debug, Clone, Copy)]
 pub struct SnapTarget;
+
+/// Reference to a layer by ID.
+///
+/// Entities without this component are considered "ByLayer" — they inherit
+/// their visual properties from the current/default layer.
+#[derive(Debug, Clone, Copy)]
+pub struct LayerRef(pub u32); // LayerId — will be replaced with proper type in Step 3
+
+/// Determines how a visual property is sourced.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PropertySource {
+    ByLayer,
+    ByBlock,
+    Explicit,
+}
+
+impl Default for PropertySource {
+    fn default() -> Self {
+        Self::ByLayer
+    }
+}
+
+/// A property value that can be inherited from Layer or Block.
+#[derive(Debug, Clone, Copy)]
+pub enum PropertyValue<T: Copy> {
+    ByLayer,
+    ByBlock,
+    Explicit(T),
+}
+
+impl<T: Copy> Default for PropertyValue<T> {
+    fn default() -> Self {
+        Self::ByLayer
+    }
+}
+
+/// Reference to a block definition by ID.
+#[derive(Debug, Clone, Copy)]
+pub struct BlockRef {
+    pub definition: u32, // BlockId — will be replaced with proper type in Step 6
+}
