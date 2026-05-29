@@ -182,6 +182,7 @@ mod tests {
     }
 
     /// Helper: navigate to the text edit widget and simulate typing.
+    #[allow(dead_code)]
     fn type_text(harness: &mut Harness<'static, CommandState>, text: &str) {
         // We can use Harness::key_press for individual keys,
         // but for general text we need to fire Text events.
@@ -331,8 +332,7 @@ mod tests {
 
     #[test]
     fn test_command_line_active_prompt() {
-        let mut state = CommandState::default();
-        state.active = Some(Box::new(TestCommand));
+        let state = CommandState { active: Some(Box::new(TestCommand)), ..Default::default() };
         let mut harness = make_harness_with(state);
         harness.run();
         assert_label_visible(&harness, "Enter test value:");
@@ -342,8 +342,7 @@ mod tests {
 
     #[test]
     fn test_command_line_error_display() {
-        let mut state = CommandState::default();
-        state.last_error = Some("Invalid input".to_string());
+        let state = CommandState { last_error: Some("Invalid input".to_string()), ..Default::default() };
         let mut harness = make_harness_with(state);
         harness.run();
         assert_label_visible(&harness, "Invalid input");
@@ -361,8 +360,7 @@ mod tests {
 
     #[test]
     fn test_command_line_error_cleared() {
-        let mut state = CommandState::default();
-        state.last_error = Some("Old error".to_string());
+        let state = CommandState { last_error: Some("Old error".to_string()), ..Default::default() };
         let mut harness = make_harness_with(state);
         harness.run();
         let error = harness.query_by_label("Old error");
@@ -385,8 +383,7 @@ mod tests {
     fn test_command_line_history_not_displayed_as_labels() {
         // Command history entries (Vec<String>) are NOT shown as UI labels.
         // They're internal state, not rendered. This test verifies that.
-        let mut state = CommandState::default();
-        state.history = vec!["LINE".to_string(), "CIRCLE".to_string()];
+        let state = CommandState { history: vec!["LINE".to_string(), "CIRCLE".to_string()], ..Default::default() };
         let mut harness = make_harness_with(state);
         harness.run();
         // The "Type command:" prompt should still be the only prompt.
@@ -397,10 +394,12 @@ mod tests {
 
     #[test]
     fn test_command_line_smoke_layout() {
-        let mut state = CommandState::default();
-        state.active = Some(Box::new(TestCommand));
-        state.last_error = Some("Test error".to_string());
-        state.buffer = "TEST input".to_string();
+        let state = CommandState {
+            active: Some(Box::new(TestCommand)),
+            last_error: Some("Test error".to_string()),
+            buffer: "TEST input".to_string(),
+            ..Default::default()
+        };
         let mut harness = make_harness_with(state);
         harness.run();
         // All elements should render without panic:

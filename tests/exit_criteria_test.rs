@@ -10,7 +10,7 @@ fn test_exit_criteria() {
     assert_eq!(arr, [3.0, 4.0], "Point2D conversion failed");
     
     // 2. BoundingBox2D union/center/is_empty logic is consistent
-    let mut bbox = BoundingBox2D {
+    let bbox = BoundingBox2D {
         min: Point2D::new(0.0, 0.0),
         max: Point2D::new(10.0, 10.0),
     };

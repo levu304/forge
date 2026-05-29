@@ -37,7 +37,7 @@ fn test_color() {
 
 #[test]
 fn test_bounding_box() {
-    let mut bbox = BoundingBox2D {
+    let bbox = BoundingBox2D {
         min: Point2D::new(0.0, 0.0),
         max: Point2D::new(10.0, 10.0),
     };

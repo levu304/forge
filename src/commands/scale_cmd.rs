@@ -293,6 +293,7 @@ mod tests {
         ))
     }
 
+    #[allow(dead_code)]
     fn make_arc(world: &mut World, center: Point2D) -> hecs::Entity {
         world.spawn((
             ArcData {

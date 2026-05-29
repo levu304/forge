@@ -459,6 +459,7 @@ mod tests {
     }
 
     /// Spawn a circle entity with `Renderable` and return its handle.
+    #[allow(dead_code)]
     fn make_circle(world: &mut World) -> Entity {
         world.spawn((
             CircleData {
@@ -485,6 +486,7 @@ mod tests {
     }
 
     /// Spawn an arc entity with `Renderable` and return its handle.
+    #[allow(dead_code)]
     fn make_arc(world: &mut World) -> Entity {
         world.spawn((
             ArcData {

@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn button_rects_are_disjoint_and_ordered() {
-        let mut harness = new_harness();
+        let harness = new_harness();
 
         let line = harness.get_by_label("LINE").rect();
         let circle = harness.get_by_label("CIRCLE").rect();

@@ -897,7 +897,7 @@ mod tests {
     #[test]
     fn test_collect_line_vertices_non_selected_entity_has_is_selected_0() {
         let mut world = hecs::World::new();
-        let entity = world.spawn((
+        let _entity = world.spawn((
             LineData {
                 start: Point2D::new(5.0, 5.0),
                 end: Point2D::new(15.0, 15.0),

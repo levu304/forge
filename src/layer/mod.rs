@@ -4,7 +4,7 @@
 //!
 //! | Module / Type     | Role                                          |
 //! |-------------------|-----------------------------------------------|
-//! | [`layer`]         | [`Layer`], [`LayerId`], [`Linetype`]          |
+//! | [`types`]         | [`Layer`], [`LayerId`], [`Linetype`]          |
 //! | [`table`]         | [`LayerTable`] — CRUD by ID and name          |
 //! | [`error`]         | [`LayerError`] — fallible operation errors    |
 //! | [`LayerRef`]      | ECS component linking entities to a layer     |
@@ -12,13 +12,13 @@
 //! | [`LayerManager`]  | Facade over [`LayerTable`] + ECS delete logic |
 
 pub mod error;
-pub mod layer;
+pub mod types;
 pub mod table;
 
 use hecs::World;
 
 pub use error::LayerError;
-pub use layer::{Layer, LayerId, Linetype};
+pub use types::{Layer, LayerId, Linetype};
 pub use table::LayerTable;
 
 /// ECS component that associates an entity with a layer.

@@ -1,4 +1,7 @@
 //! Core layer types: [`LayerId`], [`Linetype`], [`Layer`].
+//!
+//! Renamed from `layer.rs` to `types.rs` to avoid clippy::module_inception
+//! (a module declaring `pub mod layer` inside `layer/mod.rs`).
 
 use std::fmt;
 
@@ -16,9 +19,10 @@ impl LayerId {
 }
 
 /// Line-style pattern used when rendering geometry on a layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Linetype {
     /// Continuous solid line.
+    #[default]
     Solid,
     /// Short evenly spaced dots.
     Dotted,
@@ -30,12 +34,6 @@ pub enum Linetype {
     Border,
     /// Long-dash center-line pattern.
     Center,
-}
-
-impl Default for Linetype {
-    fn default() -> Self {
-        Self::Solid
-    }
 }
 
 /// Stipple bitmask values used by the renderer for each linetype.
