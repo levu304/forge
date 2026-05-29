@@ -173,11 +173,13 @@ impl History {
     ///
     /// Replays operations **in reverse** order:
     ///
-    /// | Op | Undo action |
-    /// |----|-------------|
-    /// | `Spawn*` | `world.despawn(entity)` |
-    /// | `Despawn*` | Re-spawn entity with stored data + [`Renderable`] |
-    /// | `Set*` | Restore `old` value via `world.insert_one` |
+/// | Op | Undo action |
+/// |----|-------------|
+/// | `Spawn*` | `world.despawn(entity)` |
+/// | `Despawn*` | Re-spawn entity with stored data + [`Renderable`] |
+/// | `Set*` (data) | Restore `old` value via `world.insert_one` |
+/// | `SetLayerRef` | Insert `old` or remove component when `None` |
+/// | `SetPropertySource` | Restore `old` value via `world.insert_one` |
     ///
     /// After a `Despawn*` re-spawn, the resulting entity handle (which is
     /// different from the original) is recorded in the internal
@@ -234,6 +236,21 @@ impl History {
                 AtomicOp::SetPosition { entity, old, .. } => {
                     world.insert_one(*entity, *old).ok();
                 }
+
+                // Property — restore old value
+                AtomicOp::SetLayerRef { entity, old, .. } => {
+                    match old {
+                        Some(lr) => {
+                            world.insert_one(*entity, *lr).ok();
+                        }
+                        None => {
+                            world.remove_one::<crate::ecs::components::LayerRef>(*entity).ok();
+                        }
+                    }
+                }
+                AtomicOp::SetPropertySource { entity, old, .. } => {
+                    world.insert_one(*entity, *old).ok();
+                }
             }
         }
 
@@ -246,11 +263,13 @@ impl History {
     ///
     /// Replays operations **forward**:
     ///
-    /// | Op | Redo action |
-    /// |----|-------------|
-    /// | `Spawn*` | Re-spawn entity with stored data + [`Renderable`] |
-    /// | `Despawn*` | `world.despawn(entity)` |
-    /// | `Set*` | Apply `new` value via `world.insert_one` |
+/// | Op | Redo action |
+/// |----|-------------|
+/// | `Spawn*` | Re-spawn entity with stored data + [`Renderable`] |
+/// | `Despawn*` | `world.despawn(entity)` |
+/// | `Set*` (data) | Apply `new` value via `world.insert_one` |
+/// | `SetLayerRef` | Insert `new` or remove component when `None` |
+/// | `SetPropertySource` | Apply `new` value via `world.insert_one` |
     ///
     /// After a `Spawn*` re-spawn, the resulting entity handle (which is
     /// different from the original) is recorded in the internal
@@ -315,6 +334,21 @@ impl History {
                     entity, new: val, ..
                 } => {
                     world.insert_one(*entity, *val).ok();
+                }
+
+                // Property — apply new value
+                AtomicOp::SetLayerRef { entity, new, .. } => {
+                    match new {
+                        Some(lr) => {
+                            world.insert_one(*entity, *lr).ok();
+                        }
+                        None => {
+                            world.remove_one::<crate::ecs::components::LayerRef>(*entity).ok();
+                        }
+                    }
+                }
+                AtomicOp::SetPropertySource { entity, new, .. } => {
+                    world.insert_one(*entity, *new).ok();
                 }
             }
         }

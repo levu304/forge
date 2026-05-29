@@ -25,3 +25,30 @@ impl Color {
     pub const GRAY_MEDIUM: Self = Self::from_hex(0x666666);
     pub const GRAY_LIGHT: Self = Self::from_hex(0x888888);
 }
+
+// ---------------------------------------------------------------------------
+// Color ↔ egui::Color32 conversions
+// ---------------------------------------------------------------------------
+
+impl From<Color> for egui::Color32 {
+    fn from(c: Color) -> Self {
+        egui::Color32::from_rgba_premultiplied(
+            (c.r * 255.0).round() as u8,
+            (c.g * 255.0).round() as u8,
+            (c.b * 255.0).round() as u8,
+            (c.a * 255.0).round() as u8,
+        )
+    }
+}
+
+impl From<egui::Color32> for Color {
+    fn from(c: egui::Color32) -> Self {
+        let [r, g, b, a] = c.to_srgba_unmultiplied();
+        Self {
+            r: r as f32 / 255.0,
+            g: g as f32 / 255.0,
+            b: b as f32 / 255.0,
+            a: a as f32 / 255.0,
+        }
+    }
+}
