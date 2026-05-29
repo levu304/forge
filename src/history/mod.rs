@@ -432,7 +432,8 @@ pub fn apply_entity_remapping(
 mod tests {
     use super::*;
     use crate::ecs::components::{
-        ArcData, CircleData, LineData, PolylineData, Position, Renderable,
+        ArcData, CircleData, LayerRef, LineData, PolylineData, Position, PropertySource,
+        Renderable,
     };
     use crate::geometry::Point2D;
     use crate::selection::SelectionManager;
@@ -1058,5 +1059,134 @@ mod tests {
         // Undo → despawns the entity
         history.undo(&mut world);
         assert!(world.get::<&PolylineData>(entity).is_err());
+    }
+
+    // ------------------------------------------------------------------
+    // Undo/redo with SetLayerRef
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn history_set_layer_ref_undo_redo() {
+        let mut world = World::new();
+        let entity = world.spawn((LayerRef(5),));
+
+        let old_lr = Some(LayerRef(5));
+        let new_lr = Some(LayerRef(10));
+
+        world.insert_one(entity, LayerRef(10)).ok();
+
+        let mut history = History::new();
+        let mut tx = Transaction::new("change layer");
+        tx.push(AtomicOp::SetLayerRef {
+            entity,
+            old: old_lr,
+            new: new_lr,
+        });
+        history.push(tx);
+
+        // Verify current state
+        assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 10);
+
+        // Undo → restores old layer ref
+        history.undo(&mut world);
+        assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 5);
+
+        // Redo → applies new layer ref
+        history.redo(&mut world);
+        assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 10);
+    }
+
+    #[test]
+    fn history_set_layer_ref_none_to_some() {
+        let mut world = World::new();
+        let entity = world.spawn(()); // No LayerRef component
+
+        let old_lr: Option<LayerRef> = None;
+        let new_lr = Some(LayerRef(7));
+
+        world.insert_one(entity, LayerRef(7)).ok();
+
+        let mut history = History::new();
+        let mut tx = Transaction::new("add layer ref");
+        tx.push(AtomicOp::SetLayerRef {
+            entity,
+            old: old_lr,
+            new: new_lr,
+        });
+        history.push(tx);
+
+        // Undo → removes the component
+        history.undo(&mut world);
+        assert!(world.get::<&LayerRef>(entity).is_err());
+
+        // Redo → re-inserts it
+        history.redo(&mut world);
+        assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 7);
+    }
+
+    #[test]
+    fn history_set_layer_ref_some_to_none() {
+        let mut world = World::new();
+        let entity = world.spawn((LayerRef(3),));
+
+        let old_lr = Some(LayerRef(3));
+        let new_lr: Option<LayerRef> = None;
+
+        world.remove_one::<LayerRef>(entity).ok();
+
+        let mut history = History::new();
+        let mut tx = Transaction::new("remove layer ref");
+        tx.push(AtomicOp::SetLayerRef {
+            entity,
+            old: old_lr,
+            new: new_lr,
+        });
+        history.push(tx);
+
+        // Undo → re-inserts the component
+        history.undo(&mut world);
+        assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 3);
+
+        // Redo → removes it again
+        history.redo(&mut world);
+        assert!(world.get::<&LayerRef>(entity).is_err());
+    }
+
+    // ------------------------------------------------------------------
+    // Undo/redo with SetPropertySource
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn history_set_property_source_undo_redo() {
+        let mut world = World::new();
+        let entity = world.spawn((PropertySource::ByLayer,));
+
+        let old_ps = PropertySource::ByLayer;
+        let new_ps = PropertySource::Explicit;
+
+        world.insert_one(entity, PropertySource::Explicit).ok();
+
+        let mut history = History::new();
+        let mut tx = Transaction::new("set explicit");
+        tx.push(AtomicOp::SetPropertySource {
+            entity,
+            old: old_ps,
+            new: new_ps,
+        });
+        history.push(tx);
+
+        // Undo → restores ByLayer
+        history.undo(&mut world);
+        assert_eq!(
+            *world.get::<&PropertySource>(entity).unwrap(),
+            PropertySource::ByLayer
+        );
+
+        // Redo → re-applies Explicit
+        history.redo(&mut world);
+        assert_eq!(
+            *world.get::<&PropertySource>(entity).unwrap(),
+            PropertySource::Explicit
+        );
     }
 }

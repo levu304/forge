@@ -72,12 +72,10 @@ impl PropertyResolver {
                     .unwrap_or_else(|| resolve_color_from_layer(world, entity, layer_table))
             }
             PropertySource::ByBlock => {
-                if world.get::<&BlockRef>(entity).is_ok() {
-                    resolve_color_from_block(world, entity, layer_table)
-                        .unwrap_or_else(|| resolve_color_from_layer(world, entity, layer_table))
-                } else {
-                    resolve_color_from_layer(world, entity, layer_table)
-                }
+                // resolve_color_from_block already returns None when there
+                // is no BlockRef component, so no outer guard is needed.
+                resolve_color_from_block(world, entity, layer_table)
+                    .unwrap_or_else(|| resolve_color_from_layer(world, entity, layer_table))
             }
             PropertySource::ByLayer => resolve_color_from_layer(world, entity, layer_table),
         }
@@ -96,12 +94,8 @@ impl PropertyResolver {
                     .unwrap_or_else(|| resolve_linewidth_from_layer(world, entity, layer_table))
             }
             PropertySource::ByBlock => {
-                if world.get::<&BlockRef>(entity).is_ok() {
-                    resolve_linewidth_from_block(world, entity, layer_table)
-                        .unwrap_or_else(|| resolve_linewidth_from_layer(world, entity, layer_table))
-                } else {
-                    resolve_linewidth_from_layer(world, entity, layer_table)
-                }
+                resolve_linewidth_from_block(world, entity, layer_table)
+                    .unwrap_or_else(|| resolve_linewidth_from_layer(world, entity, layer_table))
             }
             PropertySource::ByLayer => resolve_linewidth_from_layer(world, entity, layer_table),
         }
@@ -109,26 +103,11 @@ impl PropertyResolver {
 
     /// Resolve the entity's linetype through the inheritance chain.
     ///
-    /// Linetype is not stored on geometry components, so explicit and
-    /// block resolution both fall back to the layer (linetype can only
-    /// be defined at the layer level in v0.3.0).
+    /// Linetype is not stored on geometry components, so linetype always
+    /// resolves from the entity's layer in v0.3.0 (the match on source
+    /// would be three identical arms, so we skip it).
     pub fn resolve_linetype(world: &World, entity: Entity, layer_table: &LayerTable) -> Linetype {
-        let source = world
-            .get::<&PropertySource>(entity)
-            .map(|r| *r)
-            .unwrap_or(PropertySource::ByLayer);
-
-        match source {
-            PropertySource::Explicit => {
-                // No linetype field on geometry components — fall through
-                resolve_linetype_from_layer(world, entity, layer_table)
-            }
-            PropertySource::ByBlock => {
-                // Linetype always resolves from layer in v0.3.0
-                resolve_linetype_from_layer(world, entity, layer_table)
-            }
-            PropertySource::ByLayer => resolve_linetype_from_layer(world, entity, layer_table),
-        }
+        resolve_linetype_from_layer(world, entity, layer_table)
     }
 
     /// Resolve all three visual properties at once.
@@ -156,27 +135,19 @@ impl PropertyResolver {
     /// `explicit` is used when `source` is [`PropertySource::Explicit`].
     /// `layer_ref` is the entity's [`LayerRef`] component value (0‑based
     /// layer index), or `None` if absent.
-    /// `block_ref` is the entity's [`BlockRef::definition`] value, or
-    /// `None` if absent.
     pub fn resolve_color_direct(
         source: PropertySource,
         explicit: Color,
         layer_ref: Option<u32>,
-        block_ref: Option<u32>,
         layer_table: &LayerTable,
     ) -> Color {
         match source {
             PropertySource::Explicit => explicit,
-            PropertySource::ByBlock => {
-                if block_ref.is_some() {
-                    // In v0.3.0 block definitions cannot yet carry
-                    // independent colour — fall through to ByLayer.
-                    resolve_layer_color(layer_ref, layer_table)
-                } else {
-                    resolve_layer_color(layer_ref, layer_table)
-                }
+            // ByBlock falls through to ByLayer in v0.3.0 (block definitions
+            // cannot yet carry independent colour).
+            PropertySource::ByBlock | PropertySource::ByLayer => {
+                resolve_layer_color(layer_ref, layer_table)
             }
-            PropertySource::ByLayer => resolve_layer_color(layer_ref, layer_table),
         }
     }
 
@@ -185,36 +156,25 @@ impl PropertyResolver {
         source: PropertySource,
         explicit: f32,
         layer_ref: Option<u32>,
-        block_ref: Option<u32>,
         layer_table: &LayerTable,
     ) -> f32 {
         match source {
             PropertySource::Explicit => explicit,
-            PropertySource::ByBlock => {
-                if block_ref.is_some() {
-                    resolve_layer_linewidth(layer_ref, layer_table)
-                } else {
-                    resolve_layer_linewidth(layer_ref, layer_table)
-                }
+            PropertySource::ByBlock | PropertySource::ByLayer => {
+                resolve_layer_linewidth(layer_ref, layer_table)
             }
-            PropertySource::ByLayer => resolve_layer_linewidth(layer_ref, layer_table),
         }
     }
 
     /// Resolve linetype from pre-extracted values.
+    ///
+    /// Linetype is only stored at the layer level in v0.3.0, so source is
+    /// irrelevant — the value always comes from the entity's layer.
     pub fn resolve_linetype_direct(
-        source: PropertySource,
-        _explicit: Linetype,
         layer_ref: Option<u32>,
-        _block_ref: Option<u32>,
         layer_table: &LayerTable,
     ) -> Linetype {
-        // Linetype is only stored at the layer level in v0.3.0.
-        match source {
-            PropertySource::Explicit | PropertySource::ByBlock | PropertySource::ByLayer => {
-                resolve_layer_linetype(layer_ref, layer_table)
-            }
-        }
+        resolve_layer_linetype(layer_ref, layer_table)
     }
 }
 
@@ -548,7 +508,6 @@ mod tests {
             PropertySource::Explicit,
             Color::from_hex(0xFF00FF),
             Some(0),
-            None,
             &table,
         );
         assert_eq!(color, Color::from_hex(0xFF00FF));
@@ -561,7 +520,6 @@ mod tests {
             PropertySource::ByLayer,
             Color::WHITE,
             Some(1),
-            None,
             &table,
         );
         assert_eq!(color, Color::from_hex(0xFF0000));
@@ -574,7 +532,6 @@ mod tests {
             PropertySource::ByLayer,
             0.0,
             Some(1),
-            None,
             &table,
         );
         assert!((w - 1.0).abs() < f32::EPSILON);
@@ -583,13 +540,7 @@ mod tests {
     #[test]
     fn resolve_linetype_direct_by_layer() {
         let table = make_table();
-        let lt = PropertyResolver::resolve_linetype_direct(
-            PropertySource::ByLayer,
-            Linetype::Solid,
-            Some(1),
-            None,
-            &table,
-        );
+        let lt = PropertyResolver::resolve_linetype_direct(Some(1), &table);
         assert_eq!(lt, Linetype::Dashed);
     }
 }
