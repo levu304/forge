@@ -63,6 +63,11 @@ impl BoundingBox2D {
         let mut max_x = first.x;
         let mut max_y = first.y;
         for p in iter {
+            debug_assert!(
+                p.x.is_finite() && p.y.is_finite(),
+                "from_points encountered non-finite point ({}, {})",
+                p.x, p.y,
+            );
             min_x = min_x.min(p.x);
             min_y = min_y.min(p.y);
             max_x = max_x.max(p.x);
@@ -78,6 +83,7 @@ impl BoundingBox2D {
         self.min.x >= self.max.x || self.min.y >= self.max.y
     }
     pub fn center(&self) -> Point2D {
+        debug_assert!(!self.is_empty(), "center() called on empty bounding box");
         Point2D::new(
             (self.min.x + self.max.x) / 2.0,
             (self.min.y + self.max.y) / 2.0,

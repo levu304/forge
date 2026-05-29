@@ -36,6 +36,12 @@ pub struct Transform2D {
     pub translate_y: f64,
 }
 
+impl Default for Transform2D {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
 impl Transform2D {
     /// The identity transform: no scale, rotation, or translation.
     pub const IDENTITY: Transform2D = Transform2D {
@@ -48,8 +54,9 @@ impl Transform2D {
 
     /// Construct a transform from explicit translation, rotation, and scale.
     ///
-    /// `scale` is a `Point2D` where `.x` = X scale and `.y` = Y scale
-    /// (allowing non-uniform scaling).
+    /// The `scale` is split into separate `scale_x` and `scale_y` parameters
+    /// to distinguish it from the `translate` point (preventing argument-order
+    /// confusion at the call site).
     ///
     /// # Examples
     ///
@@ -58,13 +65,13 @@ impl Transform2D {
     /// let t = Transform2D::new(
     ///     Point2D::new(10.0, 20.0),     // translate
     ///     std::f64::consts::FRAC_PI_2,  // rotation
-    ///     Point2D::new(2.0, 3.0),       // scale
+    ///     2.0, 3.0,                     // scale_x, scale_y
     /// );
     /// ```
-    pub fn new(translate: Point2D, rotation: f64, scale: Point2D) -> Self {
+    pub fn new(translate: Point2D, rotation: f64, scale_x: f64, scale_y: f64) -> Self {
         Self {
-            scale_x: scale.x,
-            scale_y: scale.y,
+            scale_x,
+            scale_y,
             rotation,
             translate_x: translate.x,
             translate_y: translate.y,
@@ -80,12 +87,17 @@ impl Transform2D {
     /// let t = Transform2D::new(
     ///     Point2D::new(10.0, 0.0),       // translate right by 10
     ///     0.0,                            // no rotation
-    ///     Point2D::new(2.0, 2.0),         // scale 2×
+    ///     2.0, 2.0,                       // scale 2×
     /// );
     /// // (3, 4) scaled → (6, 8), then translated → (16, 8)
     /// assert_eq!(t.apply_to_point(Point2D::new(3.0, 4.0)), Point2D::new(16.0, 8.0));
     /// ```
     pub fn apply_to_point(&self, point: Point2D) -> Point2D {
+        debug_assert!(
+            point.x.is_finite() && point.y.is_finite(),
+            "apply_to_point called with non-finite point ({}, {})",
+            point.x, point.y,
+        );
         // 1. Scale
         let sx = point.x * self.scale_x;
         let sy = point.y * self.scale_y;
@@ -160,7 +172,7 @@ mod tests {
         let t = Transform2D::new(
             Point2D::new(0.0, 0.0),
             0.0,
-            Point2D::new(2.0, 2.0),
+            2.0, 2.0,
         );
         let result = t.apply_to_point(Point2D::new(3.0, 4.0));
         assert_eq!(result, Point2D::new(6.0, 8.0));
@@ -174,7 +186,7 @@ mod tests {
         let t = Transform2D::new(
             Point2D::new(0.0, 0.0),
             0.0,
-            Point2D::new(2.0, 3.0),
+            2.0, 3.0,
         );
         let result = t.apply_to_point(Point2D::new(1.0, 2.0));
         assert_eq!(result, Point2D::new(2.0, 6.0));
@@ -188,7 +200,7 @@ mod tests {
         let t = Transform2D::new(
             Point2D::new(0.0, 0.0),
             FRAC_PI_2,
-            Point2D::new(1.0, 1.0),
+            1.0, 1.0,
         );
         let result = t.apply_to_point(Point2D::new(1.0, 0.0));
         assert!((result.x - 0.0).abs() < 1e-12,
@@ -205,7 +217,7 @@ mod tests {
         let t = Transform2D::new(
             Point2D::new(0.0, 0.0),
             std::f64::consts::PI,
-            Point2D::new(1.0, 1.0),
+            1.0, 1.0,
         );
         let result = t.apply_to_point(Point2D::new(1.0, 0.0));
         assert!((result.x - (-1.0)).abs() < 1e-12);
@@ -220,7 +232,7 @@ mod tests {
         let t = Transform2D::new(
             Point2D::new(10.0, -5.0),
             0.0,
-            Point2D::new(1.0, 1.0),
+            1.0, 1.0,
         );
         let result = t.apply_to_point(Point2D::new(3.0, 7.0));
         assert_eq!(result, Point2D::new(13.0, 2.0));
@@ -236,7 +248,7 @@ mod tests {
         let t = Transform2D::new(
             Point2D::new(5.0, 5.0),
             0.0,
-            Point2D::new(2.0, 2.0),
+            2.0, 2.0,
         );
         let result = t.apply_to_bounds(&bbox);
         // Corners: (0,0)→(5,5), (10,0)→(25,5), (0,10)→(5,25), (10,10)→(25,25)
@@ -255,7 +267,7 @@ mod tests {
         let t = Transform2D::new(
             Point2D::new(10.0, 10.0),
             FRAC_PI_2,
-            Point2D::new(2.0, 2.0),
+            2.0, 2.0,
         );
         let result = t.apply_to_bounds(&empty);
         assert!(result.is_empty());
@@ -282,9 +294,8 @@ mod tests {
         //   TRS: translate (1,0)→(11,0), rotate→(0,11), scale→(0,22)
         let translate = Point2D::new(10.0, 0.0);
         let rotation = FRAC_PI_2;
-        let scale = Point2D::new(2.0, 2.0);
 
-        let t = Transform2D::new(translate, rotation, scale);
+        let t = Transform2D::new(translate, rotation, 2.0, 2.0);
         let result = t.apply_to_point(Point2D::new(1.0, 0.0));
 
         // SRT (correct): scale(1,0) → (2,0), rotate 90° → (0,2), translate → (10,2)
@@ -306,10 +317,9 @@ mod tests {
     #[test]
     fn test_new_constructor_round_trip() {
         let translate = Point2D::new(5.0, -3.0);
-        let scale = Point2D::new(0.5, 2.0);
         let rotation = 0.75;
 
-        let a = Transform2D::new(translate, rotation, scale);
+        let a = Transform2D::new(translate, rotation, 0.5, 2.0);
         let b = Transform2D {
             scale_x: 0.5,
             scale_y: 2.0,

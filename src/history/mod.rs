@@ -549,7 +549,7 @@ mod tests {
     fn undo_despawn_polyline_round_trip() {
         let mut world = World::new();
         let entity = make_polyline(&mut world);
-        let data = (&*world.get::<&PolylineData>(entity).unwrap()).clone();
+        let data = PolylineData::clone(&world.get::<&PolylineData>(entity).unwrap());
 
         let mut history = History::new();
         let mut tx = Transaction::new("despawn polyline");
@@ -1012,7 +1012,7 @@ mod tests {
     fn history_spawn_polyline_undo_despawns() {
         let mut world = World::new();
         let entity = make_polyline(&mut world);
-        let data = (&*world.get::<&PolylineData>(entity).unwrap()).clone();
+        let data = PolylineData::clone(&world.get::<&PolylineData>(entity).unwrap());
 
         let mut history = History::new();
         let mut tx = Transaction::new("spawn polyline");

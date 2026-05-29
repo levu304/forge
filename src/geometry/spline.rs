@@ -2,6 +2,11 @@
 
 use crate::geometry::Point2D;
 
+/// Maximum allowed segments for [`CubicBezier::to_polyline`].
+///
+/// Prevents unbounded memory allocation from extreme input values.
+pub const MAX_SPLINE_SEGMENTS: usize = 10_000;
+
 /// A cubic Bézier curve defined by four control points.
 ///
 /// The curve is parameterised by `t ∈ [0, 1]` and evaluated using the
@@ -37,6 +42,11 @@ impl CubicBezier {
     /// assert_eq!(c.evaluate(1.0), c.p3);
     /// ```
     pub fn evaluate(&self, t: f64) -> Point2D {
+        debug_assert!(
+            (0.0..=1.0).contains(&t),
+            "evaluate t={} is outside [0, 1]",
+            t,
+        );
         let t2 = t * t;
         let t3 = t2 * t;
         let mt = 1.0 - t;
@@ -80,6 +90,10 @@ impl CubicBezier {
     /// ```
     pub fn to_polyline(&self, segments: usize) -> Vec<Point2D> {
         assert!(segments > 0, "segments must be > 0");
+        assert!(
+            segments <= MAX_SPLINE_SEGMENTS,
+            "segments must be <= {MAX_SPLINE_SEGMENTS}, got {segments}",
+        );
         let step = 1.0 / segments as f64;
         let mut points = Vec::with_capacity(segments + 1);
         for i in 0..=segments {
@@ -202,5 +216,46 @@ mod tests {
         let c = symmetric_bezier();
         let s = format!("{:?}", c);
         assert!(s.contains("CubicBezier"));
+    }
+
+    // ------------------------------------------------------------------
+    // 9. to_polyline(0) panics as documented
+    // ------------------------------------------------------------------
+    #[test]
+    #[should_panic(expected = "segments must be > 0")]
+    fn test_to_polyline_zero_panics() {
+        let c = symmetric_bezier();
+        c.to_polyline(0);
+    }
+
+    // ------------------------------------------------------------------
+    // 10. to_polyline with MAX_SPLINE_SEGMENTS is allowed (boundary)
+    // ------------------------------------------------------------------
+    #[test]
+    fn test_to_polyline_max_segments() {
+        let c = symmetric_bezier();
+        let poly = c.to_polyline(MAX_SPLINE_SEGMENTS);
+        assert_eq!(poly.len(), MAX_SPLINE_SEGMENTS + 1);
+    }
+
+    // ------------------------------------------------------------------
+    // 11. to_polyline with segments > MAX_SPLINE_SEGMENTS panics
+    // ------------------------------------------------------------------
+    #[test]
+    #[should_panic(expected = "segments must be <= 10000")]
+    fn test_to_polyline_exceeds_max_segments() {
+        let c = symmetric_bezier();
+        c.to_polyline(MAX_SPLINE_SEGMENTS + 1);
+    }
+
+    // ------------------------------------------------------------------
+    // 12. evaluate with out-of-range t triggers debug assertion
+    // ------------------------------------------------------------------
+    #[test]
+    #[should_panic(expected = "outside")]
+    fn test_evaluate_out_of_range() {
+        let c = symmetric_bezier();
+        // debug_assert! fires for t outside [0,1]; caught in debug/test builds
+        c.evaluate(-1.0);
     }
 }
