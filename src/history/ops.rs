@@ -11,11 +11,12 @@
 //! | Spawn | `Spawn{Line,Circle,Arc,Polyline}` | Despawns entity | Re-spawns entity |
 //! | Despawn | `Despawn{Line,Circle,Arc,Polyline}` | Re-spawns entity | Despawns entity |
 //! | Set | `Set{Line,Circle,Arc,Polyline,Position}` | Restores `old` | Applies `new` |
+//! | Property | `Set{LayerRef,PropertySource}` | Restores `old` | Applies `new` |
 //!
 //! [`Transaction`]: super::transaction::Transaction
 
 use crate::ecs::components::{
-    ArcData, CircleData, LineData, PolylineData, Position,
+    ArcData, CircleData, LayerRef, LineData, PolylineData, Position, PropertySource,
 };
 
 /// Typed atomic undo/redo operation.
@@ -24,7 +25,11 @@ use crate::ecs::components::{
 /// - **Spawn*** stores the entity handle and initial data.
 /// - **Despawn*** stores the entity handle and the data it held at despawn time.
 /// - **Set*** stores both the `old` (pre-change) and `new` (post-change) values.
+///
+/// This enum is `#[non_exhaustive]` — new variants are added as the
+/// command system grows.  External consumers must handle a wildcard arm.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum AtomicOp {
     /// A line entity was spawned.
     SpawnLine {
@@ -95,5 +100,26 @@ pub enum AtomicOp {
         entity: hecs::Entity,
         old: Position,
         new: Position,
+    },
+
+    // ------------------------------------------------------------------
+    // Property system
+    // ------------------------------------------------------------------
+
+    /// An entity's layer reference was changed.
+    ///
+    /// `old` / `new` are `None` when the entity did not / should not have
+    /// the [`LayerRef`] component at all.
+    SetLayerRef {
+        entity: hecs::Entity,
+        old: Option<LayerRef>,
+        new: Option<LayerRef>,
+    },
+
+    /// An entity's property source was changed.
+    SetPropertySource {
+        entity: hecs::Entity,
+        old: PropertySource,
+        new: PropertySource,
     },
 }

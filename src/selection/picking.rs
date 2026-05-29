@@ -849,7 +849,7 @@ mod tests {
         assert_eq!(cmds.len(), 1);
         assert!(cmds[0].is_strip);
         // Closed loop = num_segments + 1 vertices, first == last.
-        assert!(cmds[0].vertex_count >= MIN_SEGMENTS + 1);
+        assert!(cmds[0].vertex_count > MIN_SEGMENTS);
         // The closed loop may differ by tiny floating-point error; use
         // approximate comparison.
         let first = scratch[cmds[0].vertex_offset as usize].position;

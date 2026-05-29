@@ -120,6 +120,7 @@ mod tests {
             self
         }
 
+        #[allow(dead_code)]
         fn with_selection_count(mut self, world: &mut hecs::World, count: usize) -> Self {
             for _ in 0..count {
                 let e = world.spawn(());
@@ -155,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_format_coord_positive() {
-        assert_eq!(format_coord(3.14159265), "3.1416");
+        assert_eq!(format_coord(std::f64::consts::PI), "3.1416");
     }
 
     #[test]

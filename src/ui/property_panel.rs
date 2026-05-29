@@ -1,89 +1,115 @@
-//! Property inspector — narrow right side panel (stub).
+//! Property inspector — narrow right side panel.
 //!
-//! Read-only entity property display. Full implementation deferred to v0.2.0+.
+//! Delegates to [`PropertyPalette`] for the draw implementation.
+
+use hecs::World;
+
+use crate::history::History;
+use crate::layer::LayerTable;
+use crate::property::palette::PropertyPalette;
+use crate::selection::SelectionManager;
 
 /// Draw the property inspector panel on the right side of the viewport.
 ///
-/// v0.1.0 stub — displays a heading and placeholder text only.
-/// Entity property inspection will be added in v0.2.0+.
-pub fn draw(ui: &mut egui::Ui, _world: &hecs::World) {
+/// Wraps [`PropertyPalette::draw`] inside an [`egui::Panel::right`].
+pub fn draw(
+    ui: &mut egui::Ui,
+    world: &mut World,
+    selection: &SelectionManager,
+    layer_table: &LayerTable,
+    history: &mut History,
+) {
+    let palette = PropertyPalette;
     egui::Panel::right("property_panel")
-        .resizable(false)
-        .default_size(180.0)
+        .resizable(true)
+        .default_size(260.0)
         .show_inside(ui, |ui| {
-            ui.heading("Properties");
-            ui.separator();
-            ui.label("(stub — v0.2.0+)");
+            palette.draw(ui, world, selection, layer_table, history);
         });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use egui_kittest::{Harness, kittest::Queryable};
 
-    fn make_harness() -> Harness<'static, hecs::World> {
+    use crate::history::History;
+    use crate::layer::LayerTable;
+    use crate::selection::SelectionManager;
+
+    use super::draw;
+
+    struct TestState {
+        world: hecs::World,
+        selection: SelectionManager,
+        layer_table: LayerTable,
+        history: History,
+    }
+
+    fn make_harness() -> Harness<'static, TestState> {
+        let state = TestState {
+            world: hecs::World::new(),
+            selection: SelectionManager::new(),
+            layer_table: LayerTable::new(),
+            history: History::new(),
+        };
         Harness::new_ui_state(
-            |ui, world: &mut hecs::World| {
-                draw(ui, world);
+            |ui, state: &mut TestState| {
+                draw(ui, &mut state.world, &state.selection, &state.layer_table, &mut state.history);
             },
-            hecs::World::new(),
+            state,
         )
     }
 
-    fn assert_label_visible(harness: &Harness<'static, hecs::World>, label: &str) {
+    fn assert_label_visible(harness: &Harness<'static, TestState>, label: &str) {
         let node = harness.get_by_label(label);
         let r = node.rect();
         assert!(r.size().x > 0.0 && r.size().y > 0.0, "label '{label}' not visible");
     }
 
     #[test]
-    fn test_property_panel_heading() {
+    fn test_property_panel_shows_no_selection() {
         let mut harness = make_harness();
         harness.run();
-        assert_label_visible(&harness, "Properties");
-    }
-
-    #[test]
-    fn test_property_panel_stub_text() {
-        let mut harness = make_harness();
-        harness.run();
-        assert_label_visible(&harness, "(stub — v0.2.0+)");
+        assert_label_visible(&harness, "No entity selected");
     }
 
     #[test]
     fn test_property_panel_renders_without_panic() {
         let mut harness = make_harness();
-        // Should not panic on render
         harness.run();
-        // Verify both elements coexist
-        assert_label_visible(&harness, "Properties");
-        assert_label_visible(&harness, "(stub — v0.2.0+)");
+        // With no selection the panel shows the no-selection label
+        assert_label_visible(&harness, "No entity selected");
     }
 
     #[test]
     fn test_property_panel_empty_world() {
-        // Even with an empty world, the panel should render its stub UI
+        // Even with an empty world and no selection, the panel renders
         let mut harness = make_harness();
         harness.run();
-        // The draw function takes _world and ignores it in stub mode
-        assert_label_visible(&harness, "Properties");
+        assert_label_visible(&harness, "No entity selected");
     }
 
     #[test]
-    fn test_property_panel_with_entities() {
+    fn test_property_panel_with_entities_no_selection() {
         let mut world = hecs::World::new();
         world.spawn(());
         world.spawn(());
 
-        let mut harness = Harness::new_ui_state(
-            |ui, w: &mut hecs::World| {
-                draw(ui, w);
-            },
+        let state = TestState {
             world,
+            selection: SelectionManager::new(),
+            layer_table: LayerTable::new(),
+            history: History::new(),
+        };
+
+        let mut harness = Harness::new_ui_state(
+            |ui, state: &mut TestState| {
+                draw(ui, &mut state.world, &state.selection, &state.layer_table, &mut state.history);
+            },
+            state,
         );
         harness.run();
-        // Still shows stub text — entities don't change the stub UI
-        assert_label_visible(&harness, "(stub — v0.2.0+)");
+        // Entities exist but none selected — shows no-selection text
+        assert_label_visible(&harness, "No entity selected");
     }
 }

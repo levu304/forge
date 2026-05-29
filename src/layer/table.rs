@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use tracing::info;
 
 use super::error::LayerError;
-use super::layer::{Layer, LayerId};
+use super::types::{Layer, LayerId};
 
 /// A table of all layers in the drawing, indexed by ID.
 ///
@@ -173,7 +173,7 @@ impl LayerTable {
     /// Iterate over all layers sorted by ascending ID.
     pub fn iter(&self) -> impl Iterator<Item = &Layer> {
         let mut ids: Vec<&LayerId> = self.layers.keys().collect();
-        ids.sort_by(|a, b| a.0.cmp(&b.0));
+        ids.sort_by_key(|a| a.0);
         ids.into_iter().map(|id| &self.layers[id])
     }
 

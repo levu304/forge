@@ -417,7 +417,7 @@ mod tests {
     #[test]
     fn test_no_entity_fallback() {
         let mut engine = SnapEngine::new(SnapConfig::default());
-        let mut world = World::new();
+        let world = World::new();
         let mut spatial = SpatialIndex::new();
         let camera = test_camera();
 
@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn test_last_result_updated_after_snap() {
         let mut engine = SnapEngine::new(SnapConfig::default());
-        let mut world = World::new();
+        let world = World::new();
         let mut spatial = SpatialIndex::new();
         let camera = test_camera();
 
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn test_empty_active_types_returns_raw() {
         let mut engine = SnapEngine::new(SnapConfig::default());
-        let mut world = World::new();
+        let world = World::new();
         let mut spatial = SpatialIndex::new();
         let camera = test_camera();
 
@@ -496,10 +496,9 @@ mod tests {
 
     #[test]
     fn test_snap_disabled_returns_raw() {
-        let mut config = SnapConfig::default();
-        config.enabled = false;
+        let config = SnapConfig { enabled: false, ..Default::default() };
         let mut engine = SnapEngine::new(config);
-        let mut world = World::new();
+        let world = World::new();
         let mut spatial = SpatialIndex::new();
         let camera = test_camera();
 

@@ -369,7 +369,7 @@ mod tests {
         // 5px away (within 12px aperture). Snapped must correct to (0,0).
         // If snap is broken, we'd get (5,0) and the test fails.
         let move_event = make_cursor_event(405.0, 300.0);
-        mapper.handle_event(&move_event, &camera, &mut snap_engine, &world, &mut spatial);
+        let _ = mapper.handle_event(&move_event, &camera, &mut snap_engine, &world, &mut spatial);
 
         // Step 2: click — should emit Click action with already-snapped coords.
         let click_event = make_left_click_event();
