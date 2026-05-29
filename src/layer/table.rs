@@ -5,8 +5,7 @@ use std::collections::HashMap;
 use tracing::info;
 
 use super::error::LayerError;
-use super::layer::{Layer, LayerId, Linetype};
-use crate::util::Color;
+use super::layer::{Layer, LayerId};
 
 /// A table of all layers in the drawing, indexed by ID.
 ///
@@ -30,16 +29,7 @@ impl LayerTable {
         let mut layers = HashMap::new();
         let mut name_map = HashMap::new();
 
-        let default = Layer {
-            id: default_id,
-            name: default_name.clone(),
-            color: Color::WHITE,
-            linetype: Linetype::Solid,
-            linewidth: 0.25,
-            visible: true,
-            locked: false,
-            frozen: false,
-        };
+        let default = Layer::new(default_id, &default_name);
 
         layers.insert(default_id, default);
         name_map.insert(default_name, default_id);
@@ -69,16 +59,7 @@ impl LayerTable {
         let id = LayerId(self.next_id);
         self.next_id += 1;
 
-        let layer = Layer {
-            id,
-            name: name.to_owned(),
-            color: Color::WHITE,
-            linetype: Linetype::Solid,
-            linewidth: 0.25,
-            visible: true,
-            locked: false,
-            frozen: false,
-        };
+        let layer = Layer::new(id, name);
 
         self.name_map.insert(name.to_owned(), id);
         self.layers.insert(id, layer);
@@ -93,7 +74,7 @@ impl LayerTable {
     /// The default layer (ID 0) cannot be deleted. If `number_of_references`
     /// is greater than zero the deletion is rejected with
     /// [`LayerError::HasReferences`].
-    pub fn delete(
+    pub(crate) fn delete(
         &mut self,
         id: LayerId,
         number_of_references: usize,
@@ -116,7 +97,7 @@ impl LayerTable {
             .layers
             .remove(&id)
             .expect("layer existence verified above");
-        self.name_map.remove(&removed.name);
+        self.name_map.remove(removed.name());
 
         // If the active layer was deleted, reset to default.
         if self.active_layer == id {
@@ -142,15 +123,15 @@ impl LayerTable {
             .get_mut(&id)
             .ok_or(LayerError::NotFound { id: id.0 })?;
 
-        if new_name != layer.name && self.name_map.contains_key(new_name) {
+        if new_name != layer.name() && self.name_map.contains_key(new_name) {
             return Err(LayerError::DuplicateName {
                 name: new_name.to_owned(),
             });
         }
 
-        self.name_map.remove(&layer.name);
+        self.name_map.remove(layer.name());
         self.name_map.insert(new_name.to_owned(), id);
-        layer.name = new_name.to_owned();
+        layer.set_name(new_name.to_owned());
 
         info!(id = id.0, name = %new_name, "renamed layer");
 
@@ -236,6 +217,7 @@ impl Default for LayerTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layer::Linetype;
     use crate::util::Color;
 
     #[test]
@@ -243,7 +225,7 @@ mod tests {
         let table = LayerTable::new();
         assert_eq!(table.len(), 1);
         let def = table.get(LayerId::DEFAULT).unwrap();
-        assert_eq!(def.name, "0");
+        assert_eq!(def.name(), "0");
         assert_eq!(def.color, Color::WHITE);
         assert_eq!(def.linetype, Linetype::Solid);
     }
@@ -352,8 +334,8 @@ mod tests {
         let id = table.insert("walls").unwrap();
         let by_id = table.get(id).unwrap();
         let by_name = table.get_by_name("walls").unwrap();
-        assert_eq!(by_id.name, "walls");
-        assert_eq!(by_name.id, id);
+        assert_eq!(by_id.name(), "walls");
+        assert_eq!(by_name.id(), id);
     }
 
     #[test]

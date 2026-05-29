@@ -69,9 +69,11 @@ impl LayerManager {
         &self.table
     }
 
-    /// Mutably borrow the inner [`LayerTable`].
-    pub fn table_mut(&mut self) -> &mut LayerTable {
-        &mut self.table
+    /// Insert a new layer with the given name.
+    ///
+    /// Delegates to [`LayerTable::insert`].
+    pub fn insert(&mut self, name: &str) -> Result<LayerId, LayerError> {
+        self.table.insert(name)
     }
 
     /// Delete a layer after counting entities that reference it in `world`.
@@ -121,10 +123,17 @@ impl LayerManager {
         resource_entity: hecs::Entity,
         id: LayerId,
     ) -> Result<(), LayerError> {
+        let prev = self.table.active();
         self.table.set_active(id)?;
         world
             .insert_one(resource_entity, ActiveLayer(id))
-            .map_err(|_| LayerError::NotFound { id: id.0 })?;
+            .map_err(|_| {
+                // Rollback the table mutation on ECS failure.
+                // set_active cannot fail here — `prev` was verified as
+                // valid during the earlier successful call.
+                let _ = self.table.set_active(prev);
+                LayerError::NotFound { id: id.0 }
+            })?;
         Ok(())
     }
 }
@@ -151,10 +160,10 @@ mod tests {
     }
 
     #[test]
-    fn layer_manager_table_mut() {
+    fn layer_manager_insert() {
         let table = LayerTable::new();
         let mut mgr = LayerManager::new(table);
-        let id = mgr.table_mut().insert("walls").unwrap();
+        let id = mgr.insert("walls").unwrap();
         assert_eq!(id.0, 1);
     }
 
@@ -163,7 +172,7 @@ mod tests {
         let (mut world, res, mut mgr) = make_world();
 
         // Insert a non-default layer.
-        let id = mgr.table_mut().insert("walls").unwrap();
+        let id = mgr.insert("walls").unwrap();
         world
             .insert_one(res, ActiveLayer(id))
             .expect("active layer set");
@@ -194,7 +203,7 @@ mod tests {
         let (mut world, res, mut mgr) = make_world();
 
         // Insert a non-default layer.
-        let id = mgr.table_mut().insert("walls").unwrap();
+        let id = mgr.insert("walls").unwrap();
 
         mgr.set_active_layer(&mut world, res, id).unwrap();
 

@@ -69,12 +69,23 @@ impl fmt::Display for Linetype {
 ///
 /// Each layer has a unique ID, a display name, and rendering attributes
 /// such as colour, linetype, linewidth, and visibility toggles.
+///
+/// # Invariants
+///
+/// `id` and `name` are immutable after construction — they are set at
+/// creation and cannot be changed directly. The [`LayerTable`] manages
+/// the `name` field internally through [`LayerTable::rename`] to keep
+/// the name-index in sync.
+///
+/// [`LayerTable`]: super::table::LayerTable
+/// [`LayerTable::rename`]: super::table::LayerTable::rename
 #[derive(Debug, Clone)]
 pub struct Layer {
-    /// Unique identifier.
-    pub id: LayerId,
-    /// Human-readable layer name.
-    pub name: String,
+    /// Unique identifier. Immutable after construction.
+    pub(crate) id: LayerId,
+    /// Human-readable layer name. Managed by [`LayerTable`] for index
+    /// consistency; use [`LayerTable::rename`] to change.
+    pub(crate) name: String,
     /// RGBA colour used for geometry on this layer.
     pub color: Color,
     /// Line-style pattern.
@@ -89,18 +100,42 @@ pub struct Layer {
     pub frozen: bool,
 }
 
-impl Default for Layer {
-    fn default() -> Self {
+impl Layer {
+    /// Create a new layer with the given `id` and `name` and default
+    /// visual properties (solid linetype, white, 0.25 linewidth, visible,
+    /// unlocked, thawed).
+    pub fn new(id: LayerId, name: impl Into<String>) -> Self {
         Self {
-            id: LayerId::DEFAULT,
-            name: String::new(),
+            id,
+            name: name.into(),
             color: Color::WHITE,
-            linetype: Linetype::default(),
+            linetype: Linetype::Solid,
             linewidth: 0.25,
             visible: true,
             locked: false,
             frozen: false,
         }
+    }
+
+    /// Unique identifier of this layer.
+    pub fn id(&self) -> LayerId {
+        self.id
+    }
+
+    /// Human-readable display name of this layer.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Set the layer's name (internal — use [`LayerTable::rename`]).
+    pub(crate) fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Self::new(LayerId::DEFAULT, String::new())
     }
 }
 
