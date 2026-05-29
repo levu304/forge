@@ -110,7 +110,7 @@ impl Command for EraseCommand {
                     } else if let Ok(data) = world.get::<&PolylineData>(entity) {
                         tx.push(AtomicOp::DespawnPolyline {
                             entity,
-                            data: (&*data).clone(),
+                            data: PolylineData::clone(&*data),
                         });
                     }
                     // Skip entities with no matching geometry type.

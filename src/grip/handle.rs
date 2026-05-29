@@ -2,20 +2,15 @@
 
 /// The type of a grip handle, determining its visual appearance and
 /// behaviour during drag operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GripType {
     /// Corner/endpoint grip (square).
+    #[default]
     Endpoint,
     /// Midpoint grip (triangle).
     Midpoint,
     /// Center grip (circle).
     Center,
-}
-
-impl Default for GripType {
-    fn default() -> Self {
-        Self::Endpoint
-    }
 }
 
 /// A single grip handle on an entity, used for direct manipulation.

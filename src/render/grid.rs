@@ -205,6 +205,7 @@ impl GridRenderer {
     /// * `queue` — Command queue (used for `write_buffer` on regeneration).
     /// * `device` — GPU device (used to re-create the vertex buffer if it
     ///   needs to grow).
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -302,7 +303,7 @@ impl GridRenderer {
             true
         } else {
             let ratio = camera.zoom / self.last_zoom;
-            ratio < 0.9 || ratio > 1.1
+            !(0.9..=1.1).contains(&ratio)
         };
 
         let pos_changed = if self.last_zoom == 0.0 {

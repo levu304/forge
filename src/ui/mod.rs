@@ -68,6 +68,7 @@ impl UiSystem {
     /// * `world`     – The ECS world (used by the property panel).
     /// * `snap`      – Snap engine (snap type indicators in status bar).
     /// * `selection` – Selection manager (selection count in status bar).
+    #[allow(clippy::too_many_arguments)]
     pub fn run(
         &mut self,
         window: &winit::window::Window,

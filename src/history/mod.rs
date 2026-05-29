@@ -329,7 +329,7 @@ impl History {
     /// The caller must pass this mapping to [`apply_entity_remapping`] to
     /// fix up stale handles in the selection manager and spatial index.
     pub fn take_entity_mapping(&mut self) -> EntityMapping {
-        std::mem::replace(&mut self.entity_map, EntityMapping::new())
+        std::mem::take(&mut self.entity_map)
     }
 
     /// Returns `true` if there are transactions that can be undone.
@@ -549,7 +549,7 @@ mod tests {
     fn undo_despawn_polyline_round_trip() {
         let mut world = World::new();
         let entity = make_polyline(&mut world);
-        let data = (&*world.get::<&PolylineData>(entity).unwrap()).clone();
+        let data = PolylineData::clone(&world.get::<&PolylineData>(entity).unwrap());
 
         let mut history = History::new();
         let mut tx = Transaction::new("despawn polyline");
@@ -1012,7 +1012,7 @@ mod tests {
     fn history_spawn_polyline_undo_despawns() {
         let mut world = World::new();
         let entity = make_polyline(&mut world);
-        let data = (&*world.get::<&PolylineData>(entity).unwrap()).clone();
+        let data = PolylineData::clone(&world.get::<&PolylineData>(entity).unwrap());
 
         let mut history = History::new();
         let mut tx = Transaction::new("spawn polyline");

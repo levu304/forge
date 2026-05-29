@@ -198,31 +198,21 @@ pub struct SnapTarget;
 pub struct LayerRef(pub u32); // LayerId — will be replaced with proper type in Step 3
 
 /// Determines how a visual property is sourced.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum PropertySource {
+    #[default]
     ByLayer,
     ByBlock,
     Explicit,
 }
 
-impl Default for PropertySource {
-    fn default() -> Self {
-        Self::ByLayer
-    }
-}
-
 /// A property value that can be inherited from Layer or Block.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum PropertyValue<T: Copy> {
+    #[default]
     ByLayer,
     ByBlock,
     Explicit(T),
-}
-
-impl<T: Copy> Default for PropertyValue<T> {
-    fn default() -> Self {
-        Self::ByLayer
-    }
 }
 
 /// Reference to a block definition by ID.

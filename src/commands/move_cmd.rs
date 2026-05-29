@@ -164,7 +164,7 @@ impl MoveCommand {
             };
             Some((AtomicOpValue::Arc(old), AtomicOpValue::Arc(new)))
         } else if let Ok(data) = world.get::<&PolylineData>(entity) {
-            let old: PolylineData = (&*data).clone();
+            let old: PolylineData = PolylineData::clone(&*data);
             let new = PolylineData {
                 vertices: old.vertices.iter().map(|v| *v + displacement).collect(),
                 ..old.clone()
