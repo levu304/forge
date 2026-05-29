@@ -19,10 +19,10 @@ pub fn draw(
     layer_table: &LayerTable,
     history: &mut History,
 ) {
-    let palette = PropertyPalette::default();
+    let palette = PropertyPalette;
     egui::Panel::right("property_panel")
         .resizable(true)
-        .default_width(260.0)
+        .default_size(260.0)
         .show_inside(ui, |ui| {
             palette.draw(ui, world, selection, layer_table, history);
         });

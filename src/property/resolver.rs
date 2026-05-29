@@ -262,11 +262,12 @@ fn resolve_color_from_block(world: &World, entity: Entity, layer_table: &LayerTa
     let def_id = block_ref.definition;
 
     for (e, br) in world.query::<&BlockRef>().iter() {
-        if br.definition == def_id && e != entity {
+        if br.definition == def_id
+            && e != entity
             // Block definitions carry PropertySource::ByLayer.
-            if *world.get::<&PropertySource>(e).ok()? == PropertySource::ByLayer {
-                return Some(PropertyResolver::resolve_color(world, e, layer_table));
-            }
+            && *world.get::<&PropertySource>(e).ok()? == PropertySource::ByLayer
+        {
+            return Some(PropertyResolver::resolve_color(world, e, layer_table));
         }
     }
 
@@ -282,10 +283,11 @@ fn resolve_linewidth_from_block(world: &World, entity: Entity, layer_table: &Lay
     let def_id = block_ref.definition;
 
     for (e, br) in world.query::<&BlockRef>().iter() {
-        if br.definition == def_id && e != entity {
-            if *world.get::<&PropertySource>(e).ok()? == PropertySource::ByLayer {
-                return Some(PropertyResolver::resolve_linewidth(world, e, layer_table));
-            }
+        if br.definition == def_id
+            && e != entity
+            && *world.get::<&PropertySource>(e).ok()? == PropertySource::ByLayer
+        {
+            return Some(PropertyResolver::resolve_linewidth(world, e, layer_table));
         }
     }
 

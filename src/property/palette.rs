@@ -116,7 +116,7 @@ impl PropertyPalette {
                 // -- Layer --
                 ui.horizontal(|ui| {
                     ui.label("Layer:");
-                    let combo = egui::ComboBox::from_id_source("property_layer")
+                    let combo = egui::ComboBox::from_id_salt("property_layer")
                         .selected_text(
                             layer_table
                                 .get(LayerId(new_layer_u32))
@@ -266,7 +266,7 @@ fn set_entity_color_width(
         return Some(AtomicOp::SetArcData { entity, old, new });
     }
     // PolylineData (Clone — not Copy)
-    if let Some(old) = world.get::<&PolylineData>(entity).ok().map(|r| (&*r).clone()) {
+    if let Some(old) = world.get::<&PolylineData>(entity).ok().map(|r| (*r).clone()) {
         let new = PolylineData {
             color: new_color,
             width: new_width,
