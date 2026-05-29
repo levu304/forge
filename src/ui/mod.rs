@@ -17,6 +17,8 @@ pub mod layer_panel;
 
 use crate::commands::CommandState;
 use crate::ecs::resources::{CameraState, InputState};
+use crate::history::History;
+use crate::layer::LayerTable;
 use crate::selection::SelectionManager;
 use crate::snap::SnapEngine;
 use egui::ViewportId;
@@ -61,13 +63,15 @@ impl UiSystem {
     ///
     /// # Parameters
     ///
-    /// * `window`    – The winit window (for input state and cursor management).
-    /// * `camera`    – Current camera state (used by the status bar).
-    /// * `input`     – Current input state (mouse coords shown in status bar).
-    /// * `cmd_state` – Command state (command line prompt, text buffer, errors).
-    /// * `world`     – The ECS world (used by the property panel).
-    /// * `snap`      – Snap engine (snap type indicators in status bar).
-    /// * `selection` – Selection manager (selection count in status bar).
+    /// * `window`     – The winit window (for input state and cursor management).
+    /// * `camera`     – Current camera state (used by the status bar).
+    /// * `input`      – Current input state (mouse coords shown in status bar).
+    /// * `cmd_state`  – Command state (command line prompt, text buffer, errors).
+    /// * `world`      – The ECS world (used by the property panel, mutable).
+    /// * `snap`       – Snap engine (snap type indicators in status bar).
+    /// * `selection`  – Selection manager (selection count, property editing).
+    /// * `layer_table`– Layer table for property resolution.
+    /// * `history`    – Undo/redo history (property edits record transactions).
     #[allow(clippy::too_many_arguments)]
     pub fn run(
         &mut self,
@@ -75,9 +79,11 @@ impl UiSystem {
         camera: &CameraState,
         input: &InputState,
         cmd_state: &mut CommandState,
-        world: &hecs::World,
+        world: &mut hecs::World,
         snap: &SnapEngine,
         selection: &SelectionManager,
+        layer_table: &LayerTable,
+        history: &mut History,
     ) -> UiOutput {
         let raw_input = self.egui_state.take_egui_input(window);
 
@@ -88,7 +94,7 @@ impl UiSystem {
             // and SidePanel aliases are deprecated; use Panel directly).
             status_bar::draw(ui, camera, input, snap, selection);
             toolbar::draw(ui, cmd_state);
-            property_panel::draw(ui, world);
+            property_panel::draw(ui, world, selection, layer_table, history);
             command_line::draw(ui, cmd_state);
         });
 

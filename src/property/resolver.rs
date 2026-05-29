@@ -21,10 +21,12 @@
 use hecs::{Entity, World};
 
 use crate::ecs::components::{
-    ArcData, BlockRef, CircleData, LayerRef, LineData, PolylineData, PropertySource,
+    BlockRef, LayerRef, PropertySource,
 };
 use crate::layer::{LayerId, LayerTable, Linetype};
 use crate::util::Color;
+
+use super::geometry;
 
 /// Visual properties that have been fully resolved through the
 /// ByLayer / ByBlock / Explicit inheritance chain.
@@ -66,7 +68,7 @@ impl PropertyResolver {
 
         match source {
             PropertySource::Explicit => {
-                read_entity_color(world, entity)
+                geometry::read_entity_color(world, entity)
                     .unwrap_or_else(|| resolve_color_from_layer(world, entity, layer_table))
             }
             PropertySource::ByBlock => {
@@ -90,7 +92,7 @@ impl PropertyResolver {
 
         match source {
             PropertySource::Explicit => {
-                read_entity_linewidth(world, entity)
+                geometry::read_entity_linewidth(world, entity)
                     .unwrap_or_else(|| resolve_linewidth_from_layer(world, entity, layer_table))
             }
             PropertySource::ByBlock => {
@@ -217,44 +219,6 @@ impl PropertyResolver {
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers — geometry reading
-// ---------------------------------------------------------------------------
-
-/// Try to read the `color` field from whichever geometry component the
-/// entity carries.  Returns `None` when the entity has no recognised
-/// geometry component.
-fn read_entity_color(world: &World, entity: Entity) -> Option<Color> {
-    if let Ok(data) = world.get::<&LineData>(entity) {
-        Some(data.color)
-    } else if let Ok(data) = world.get::<&CircleData>(entity) {
-        Some(data.color)
-    } else if let Ok(data) = world.get::<&ArcData>(entity) {
-        Some(data.color)
-    } else if let Ok(data) = world.get::<&PolylineData>(entity) {
-        Some(data.color)
-    } else {
-        None
-    }
-}
-
-/// Try to read the `width` field from whichever geometry component the
-/// entity carries.  Returns `None` when the entity has no recognised
-/// geometry component.
-fn read_entity_linewidth(world: &World, entity: Entity) -> Option<f32> {
-    if let Ok(data) = world.get::<&LineData>(entity) {
-        Some(data.width)
-    } else if let Ok(data) = world.get::<&CircleData>(entity) {
-        Some(data.width)
-    } else if let Ok(data) = world.get::<&ArcData>(entity) {
-        Some(data.width)
-    } else if let Ok(data) = world.get::<&PolylineData>(entity) {
-        Some(data.width)
-    } else {
-        None
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Internal helpers — ByLayer resolution
 // ---------------------------------------------------------------------------
 
@@ -327,22 +291,21 @@ fn resolve_layer_linetype(layer_ref: Option<u32>, layer_table: &LayerTable) -> L
 
 /// Resolve colour through a block definition entity.
 ///
-/// Finds the block definition entity by scanning for an entity whose
-/// [`BlockRef`] points to itself (block definitions are flagged with
-/// a sentinel definition ID).  If the block cannot be found, falls
-/// back to `None` so the caller can decide the fallback behaviour.
+/// Scans all entities sharing the same [`BlockRef::definition`] ID.
+/// The definition entity is identified by having
+/// [`PropertySource::ByLayer`] (block definitions use ByLayer, instances
+/// use ByBlock).  If the block cannot be found, falls back to `None` so
+/// the caller can decide the fallback behaviour.
 fn resolve_color_from_block(world: &World, entity: Entity, layer_table: &LayerTable) -> Option<Color> {
     let block_ref = world.get::<&BlockRef>(entity).ok()?;
     let def_id = block_ref.definition;
 
-    // Scan for a block definition entity — an entity whose own
-    // BlockRef.definition matches `def_id` AND whose PropertySource
-    // is ByLayer (indicating it is the definition, not an instance).
-    for (e, _) in world.query::<&BlockRef>().iter() {
-        let br = world.get::<&BlockRef>(e).ok()?;
+    for (e, br) in world.query::<&BlockRef>().iter() {
         if br.definition == def_id && e != entity {
-            // Found the definition — resolve its colour.
-            return Some(PropertyResolver::resolve_color(world, e, layer_table));
+            // Block definitions carry PropertySource::ByLayer.
+            if *world.get::<&PropertySource>(e).ok()? == PropertySource::ByLayer {
+                return Some(PropertyResolver::resolve_color(world, e, layer_table));
+            }
         }
     }
 
@@ -350,14 +313,18 @@ fn resolve_color_from_block(world: &World, entity: Entity, layer_table: &LayerTa
 }
 
 /// Resolve linewidth through a block definition entity.
+///
+/// Same matching logic as [`resolve_color_from_block`] — requires
+/// [`PropertySource::ByLayer`] on the candidate definition entity.
 fn resolve_linewidth_from_block(world: &World, entity: Entity, layer_table: &LayerTable) -> Option<f32> {
     let block_ref = world.get::<&BlockRef>(entity).ok()?;
     let def_id = block_ref.definition;
 
-    for (e, _) in world.query::<&BlockRef>().iter() {
-        let br = world.get::<&BlockRef>(e).ok()?;
+    for (e, br) in world.query::<&BlockRef>().iter() {
         if br.definition == def_id && e != entity {
-            return Some(PropertyResolver::resolve_linewidth(world, e, layer_table));
+            if *world.get::<&PropertySource>(e).ok()? == PropertySource::ByLayer {
+                return Some(PropertyResolver::resolve_linewidth(world, e, layer_table));
+            }
         }
     }
 
@@ -373,7 +340,7 @@ mod tests {
     use hecs::World;
 
     use super::*;
-    use crate::ecs::components::{BlockRef, LayerRef, PropertySource};
+    use crate::ecs::components::{BlockRef, LayerRef, LineData, PropertySource};
     use crate::geometry::Point2D;
     use crate::layer::{LayerId, LayerTable, Linetype};
 

@@ -30,6 +30,7 @@ use crate::commands::{
 use crate::ecs::resources::{CameraState, GridConfig, SnapConfig};
 use crate::geometry::Point2D;
 use crate::history::{History, Transaction};
+use crate::layer::LayerTable;
 use crate::input::InputMapper;
 use crate::render::RenderState;
 use crate::selection::{window_select::WindowSelectState, SelectionManager};
@@ -85,6 +86,8 @@ pub struct ForgeApp {
     pub spatial_index: SpatialIndex,
     /// Undo/redo command journal.
     pub history: History,
+    /// Layer table (layer properties for visual resolution).
+    pub layer_table: LayerTable,
     /// True when a GPU picking request is pending (consumed in render loop).
     pub needs_picking: bool,
     /// Active window selection drag state (None when not dragging).
@@ -123,6 +126,7 @@ impl ForgeApp {
         let snap_engine = SnapEngine::new(SnapConfig::default());
         let spatial_index = SpatialIndex::new();
         let history = History::new();
+        let layer_table = LayerTable::new();
         let needs_picking = false;
         let window_select_state = None;
 
@@ -137,6 +141,7 @@ impl ForgeApp {
             snap_engine,
             spatial_index,
             history,
+            layer_table,
             needs_picking,
             window_select_state,
         }
@@ -330,9 +335,11 @@ impl ForgeApp {
             &self.resources.camera,
             &self.input_mapper.state,
             &mut self.command_state,
-            &self.world,
+            &mut self.world,
             &self.snap_engine,
             &self.selection_manager,
+            &self.layer_table,
+            &mut self.history,
         );
 
         let screen_size = self.resources.camera.viewport_size;

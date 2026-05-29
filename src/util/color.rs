@@ -32,7 +32,7 @@ impl Color {
 
 impl From<Color> for egui::Color32 {
     fn from(c: Color) -> Self {
-        egui::Color32::from_rgba_premultiplied(
+        egui::Color32::from_rgba_unmultiplied(
             (c.r * 255.0).round() as u8,
             (c.g * 255.0).round() as u8,
             (c.b * 255.0).round() as u8,

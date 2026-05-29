@@ -24,21 +24,21 @@ use crate::history::{AtomicOp, History, Transaction};
 /// [`SetPropertySource`]: AtomicOp::SetPropertySource
 /// [`SetLayerRef`]: AtomicOp::SetLayerRef
 ///
-/// # Panics
-///
-/// Panics if `source` has been despawned (the caller must ensure the
-/// source entity is alive before calling).
+/// If the source entity is despawned or lacks a [`PropertySource`]
+/// component, `ByLayer` is used as the fallback — the function is
+/// resilient and will not panic.
 pub fn match_properties(
     world: &mut World,
     source: Entity,
     targets: &[Entity],
     history: &mut History,
 ) {
-    // Read source properties (panic if source is dead).
+    // Read source properties (fall back to ByLayer if absent).
     let src_source = world
         .get::<&PropertySource>(source)
+        .ok()
         .map(|r| *r)
-        .expect("match_properties: source entity has no PropertySource component");
+        .unwrap_or(PropertySource::ByLayer);
     let src_layer = world.get::<&LayerRef>(source).ok().map(|r| *r);
 
     let mut tx = Transaction::new("Match Properties");

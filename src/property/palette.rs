@@ -15,6 +15,7 @@ use crate::layer::{LayerId, LayerTable};
 use crate::selection::SelectionManager;
 use crate::util::Color;
 
+use super::geometry;
 use super::resolver::PropertyResolver;
 
 /// A side panel widget that shows and edits the visual properties of the
@@ -29,28 +30,31 @@ use super::resolver::PropertyResolver;
 /// | ≥2    | "N entities selected" (read-only) |
 ///
 /// Every UI mutation records an undo transaction.
+///
+/// # Panel integration
+///
+/// Callers should wrap this inside an
+/// [`egui::Panel::right(...).show_inside(ui, |ui| ...)`] — the palette
+/// does **not** create its own panel frame (that is the caller's
+/// responsibility).
 #[derive(Debug, Clone, Default)]
 pub struct PropertyPalette;
 
 impl PropertyPalette {
-    /// Draw the property palette side panel.
+    /// Draw the property palette content inside an existing egui [`Ui`].
     ///
     /// `world` is accessed for both reads (current component values)
     /// and writes (applying edits).  Mutations are recorded in `history`
     /// as undoable transactions.
     pub fn draw(
         &self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         world: &mut World,
         selection: &SelectionManager,
         layer_table: &LayerTable,
         history: &mut History,
     ) {
-        egui::SidePanel::right("property_palette")
-            .resizable(true)
-            .default_width(260.0)
-            .show(ctx, |ui| {
-                let count = selection.count();
+        let count = selection.count();
                 if count == 0 {
                     ui.vertical_centered(|ui| {
                         ui.add_space(12.0);
@@ -79,8 +83,8 @@ impl PropertyPalette {
                     .map(|r| *r)
                     .unwrap_or(PropertySource::ByLayer);
                 let old_layer_u32 = world.get::<&LayerRef>(entity).ok().map(|lr| lr.0);
-                let old_color = read_entity_color(world, entity).unwrap_or(Color::WHITE);
-                let old_width = read_entity_linewidth(world, entity).unwrap_or(0.25);
+                let old_color = geometry::read_entity_color(world, entity).unwrap_or(Color::WHITE);
+                let old_width = geometry::read_entity_linewidth(world, entity).unwrap_or(0.25);
 
                 // Resolved values for display
                 let resolved = PropertyResolver::resolve_all(world, entity, layer_table);
@@ -98,7 +102,7 @@ impl PropertyPalette {
                 ui.separator();
 
                 // -- Entity type --
-                ui.label(format!("Entity: {}", entity_type_name(world, entity)));
+                ui.label(format!("Entity: {}", geometry::entity_type_name(world, entity)));
 
                 // -- Source label --
                 let source_str = match old_source {
@@ -131,7 +135,7 @@ impl PropertyPalette {
                 ui.label(format!(
                     "Resolved layer: {}",
                     layer_table
-                        .get(LayerId(resolved.linewidth as u32))
+                        .get(LayerId(old_layer_u32.unwrap_or(0)))
                         .map(|l| l.name().to_owned())
                         .unwrap_or_else(|| "—".to_owned())
                 ));
@@ -208,41 +212,6 @@ impl PropertyPalette {
                         history.push(tx);
                     }
                 }
-            });
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Internal helpers — reading geometry properties
-// ---------------------------------------------------------------------------
-
-/// Read the `color` field from an entity's geometry component, if any.
-fn read_entity_color(world: &World, entity: Entity) -> Option<Color> {
-    if let Ok(d) = world.get::<&LineData>(entity) {
-        Some(d.color)
-    } else if let Ok(d) = world.get::<&CircleData>(entity) {
-        Some(d.color)
-    } else if let Ok(d) = world.get::<&ArcData>(entity) {
-        Some(d.color)
-    } else if let Ok(d) = world.get::<&PolylineData>(entity) {
-        Some(d.color)
-    } else {
-        None
-    }
-}
-
-/// Read the `width` field from an entity's geometry component, if any.
-fn read_entity_linewidth(world: &World, entity: Entity) -> Option<f32> {
-    if let Ok(d) = world.get::<&LineData>(entity) {
-        Some(d.width)
-    } else if let Ok(d) = world.get::<&CircleData>(entity) {
-        Some(d.width)
-    } else if let Ok(d) = world.get::<&ArcData>(entity) {
-        Some(d.width)
-    } else if let Ok(d) = world.get::<&PolylineData>(entity) {
-        Some(d.width)
-    } else {
-        None
     }
 }
 
@@ -314,25 +283,6 @@ fn set_entity_color_width(
     None
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers — entity metadata
-// ---------------------------------------------------------------------------
 
-/// Return a human-readable name for the entity's primary geometry type.
-fn entity_type_name(world: &World, entity: Entity) -> String {
-    if world.get::<&LineData>(entity).is_ok() {
-        "Line".into()
-    } else if world.get::<&CircleData>(entity).is_ok() {
-        "Circle".into()
-    } else if world.get::<&ArcData>(entity).is_ok() {
-        "Arc".into()
-    } else if world.get::<&PolylineData>(entity).is_ok() {
-        "Polyline".into()
-    } else if world.get::<&crate::ecs::components::BlockRef>(entity).is_ok() {
-        "Block Instance".into()
-    } else {
-        "Unknown".into()
-    }
-}
 
 
