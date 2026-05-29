@@ -38,6 +38,8 @@ pub struct ResolvedProperties {
     pub linewidth: f32,
     /// Resolved line-style pattern.
     pub linetype: Linetype,
+    /// Resolved layer ID (after property-source inheritance).
+    pub layer_id: LayerId,
 }
 
 /// Resolves visual properties through the CAD inheritance chain.
@@ -61,10 +63,7 @@ impl PropertyResolver {
 
     /// Resolve the entity's colour through the inheritance chain.
     pub fn resolve_color(world: &World, entity: Entity, layer_table: &LayerTable) -> Color {
-        let source = world
-            .get::<&PropertySource>(entity)
-            .map(|r| *r)
-            .unwrap_or(PropertySource::ByLayer);
+        let source = entity_property_source(world, entity);
 
         match source {
             PropertySource::Explicit => {
@@ -83,10 +82,7 @@ impl PropertyResolver {
 
     /// Resolve the entity's linewidth through the inheritance chain.
     pub fn resolve_linewidth(world: &World, entity: Entity, layer_table: &LayerTable) -> f32 {
-        let source = world
-            .get::<&PropertySource>(entity)
-            .map(|r| *r)
-            .unwrap_or(PropertySource::ByLayer);
+        let source = entity_property_source(world, entity);
 
         match source {
             PropertySource::Explicit => {
@@ -116,6 +112,7 @@ impl PropertyResolver {
             color: Self::resolve_color(world, entity, layer_table),
             linewidth: Self::resolve_linewidth(world, entity, layer_table),
             linetype: Self::resolve_linetype(world, entity, layer_table),
+            layer_id: entity_layer_id(world, entity),
         }
     }
 
@@ -187,8 +184,7 @@ fn resolve_color_from_layer(world: &World, entity: Entity, layer_table: &LayerTa
     let layer_id = entity_layer_id(world, entity);
     layer_table
         .get(layer_id)
-        .map(|l| l.color)
-        .unwrap_or(Color::WHITE)
+        .map_or(Color::WHITE, |l| l.color)
 }
 
 /// Resolve linewidth from the entity's layer.
@@ -196,8 +192,7 @@ fn resolve_linewidth_from_layer(world: &World, entity: Entity, layer_table: &Lay
     let layer_id = entity_layer_id(world, entity);
     layer_table
         .get(layer_id)
-        .map(|l| l.linewidth)
-        .unwrap_or(0.25)
+        .map_or(0.25, |l| l.linewidth)
 }
 
 /// Resolve linetype from the entity's layer.
@@ -205,8 +200,7 @@ fn resolve_linetype_from_layer(world: &World, entity: Entity, layer_table: &Laye
     let layer_id = entity_layer_id(world, entity);
     layer_table
         .get(layer_id)
-        .map(|l| l.linetype)
-        .unwrap_or(Linetype::Solid)
+        .map_or(Linetype::Solid, |l| l.linetype)
 }
 
 /// Determine the layer ID for an entity.
@@ -218,6 +212,15 @@ fn entity_layer_id(world: &World, entity: Entity) -> LayerId {
         .get::<&LayerRef>(entity)
         .map(|lr| LayerId(lr.0))
         .unwrap_or(LayerId::DEFAULT)
+}
+
+/// Read the entity's property source, defaulting to [`PropertySource::ByLayer`].
+fn entity_property_source(world: &World, entity: Entity) -> PropertySource {
+    world
+        .get::<&PropertySource>(entity)
+        .ok()
+        .map(|r| *r)
+        .unwrap_or(PropertySource::ByLayer)
 }
 
 // ---------------------------------------------------------------------------
@@ -233,16 +236,14 @@ fn resolve_layer_linewidth(layer_ref: Option<u32>, layer_table: &LayerTable) -> 
     let id = layer_ref.map_or(LayerId::DEFAULT, LayerId);
     layer_table
         .get(id)
-        .map(|l| l.linewidth)
-        .unwrap_or(0.25)
+        .map_or(0.25, |l| l.linewidth)
 }
 
 fn resolve_layer_linetype(layer_ref: Option<u32>, layer_table: &LayerTable) -> Linetype {
     let id = layer_ref.map_or(LayerId::DEFAULT, LayerId);
     layer_table
         .get(id)
-        .map(|l| l.linetype)
-        .unwrap_or(Linetype::Solid)
+        .map_or(Linetype::Solid, |l| l.linetype)
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +496,16 @@ mod tests {
         assert_eq!(resolved.color, Color::from_hex(0xFF0000));
         assert!((resolved.linewidth - 1.0).abs() < f32::EPSILON);
         assert_eq!(resolved.linetype, Linetype::Dashed);
+        assert_eq!(resolved.layer_id, LayerId(1));
+    }
+
+    #[test]
+    fn resolve_all_no_layer_ref_defaults_to_layer_0() {
+        let mut world = World::new();
+        let table = make_table();
+        let entity = world.spawn((PropertySource::ByLayer,));
+        let resolved = PropertyResolver::resolve_all(&world, entity, &table);
+        assert_eq!(resolved.layer_id, LayerId::DEFAULT);
     }
 
     // ------------------------------------------------------------------

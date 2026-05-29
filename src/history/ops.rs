@@ -25,7 +25,11 @@ use crate::ecs::components::{
 /// - **Spawn*** stores the entity handle and initial data.
 /// - **Despawn*** stores the entity handle and the data it held at despawn time.
 /// - **Set*** stores both the `old` (pre-change) and `new` (post-change) values.
+///
+/// This enum is `#[non_exhaustive]` — new variants are added as the
+/// command system grows.  External consumers must handle a wildcard arm.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum AtomicOp {
     /// A line entity was spawned.
     SpawnLine {
