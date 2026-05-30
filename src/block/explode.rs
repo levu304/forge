@@ -116,12 +116,14 @@ pub fn explode_block_insert(
             BlockEntity::Arc(center, radius, start_angle, end_angle, ps, _lr) => {
                 let center = transform.apply_to_point(*center);
                 let radius = radius * scale_x;
+                let start_angle = transform.apply_to_angle(*start_angle);
+                let end_angle = transform.apply_to_angle(*end_angle);
                 let entity = world.spawn((
                     ArcData {
                         center,
                         radius,
-                        start_angle: *start_angle,
-                        end_angle: *end_angle,
+                        start_angle,
+                        end_angle,
                         color: Color::WHITE,
                         width: 1.0,
                     },
@@ -134,8 +136,8 @@ pub fn explode_block_insert(
                     data: ArcData {
                         center,
                         radius,
-                        start_angle: *start_angle,
-                        end_angle: *end_angle,
+                        start_angle,
+                        end_angle,
                         color: Color::WHITE,
                         width: 1.0,
                     },
@@ -464,6 +466,99 @@ mod tests {
             // center was (0,0), scale 2× → (0,0), translate (5,5) → (5,5)
             assert_eq!(arc.center.x, 5.0);
             assert_eq!(arc.center.y, 5.0);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Arc angles are rotated by transform.rotation
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_explode_arc_angles_rotated_by_transform() {
+        let mut world = World::new();
+        let mut table = BlockTable::new();
+        let mut history = History::new();
+
+        // Block with arc 0°→90°, insert with 90° rotation (π/2)
+        let transform = Transform2D::new(
+            Point2D::new(0.0, 0.0),
+            std::f64::consts::FRAC_PI_2,
+            1.0,
+            1.0,
+        );
+        let (entity, block_ref) = setup_insert(
+            &mut world,
+            &mut table,
+            make_arc_def(),
+            0,
+            transform,
+        );
+
+        explode_block_insert(&mut world, &table, entity, &block_ref, &mut history).unwrap();
+
+        for (_e, arc) in &mut world.query::<&ArcData>() {
+            // 0° + 90° → 90°
+            assert!(
+                (arc.start_angle - 90.0).abs() < 1e-12,
+                "expected start_angle 90°, got {}",
+                arc.start_angle,
+            );
+            // 90° + 90° → 180°
+            assert!(
+                (arc.end_angle - 180.0).abs() < 1e-12,
+                "expected end_angle 180°, got {}",
+                arc.end_angle,
+            );
+        }
+    }
+
+    #[test]
+    fn test_explode_arc_angles_wrap_at_360() {
+        let mut world = World::new();
+        let mut table = BlockTable::new();
+        let mut history = History::new();
+
+        // Arc 300°→350°, rotate by 90° → should wrap: 30°→80°
+        let def = BlockDef {
+            name: "wrap-arc".to_string(),
+            base_point: Point2D::new(0.0, 0.0),
+            entities: vec![BlockEntity::Arc(
+                Point2D::new(0.0, 0.0),
+                5.0,
+                300.0,
+                350.0,
+                PropertySource::Explicit,
+                LayerRef(0),
+            )],
+            bounds: BoundingBox2D::empty(),
+        };
+
+        let transform = Transform2D::new(
+            Point2D::new(0.0, 0.0),
+            std::f64::consts::FRAC_PI_2,
+            1.0,
+            1.0,
+        );
+        let mut table = BlockTable::new();
+        let block_id = table.insert(def).unwrap();
+        let block_ref = BlockRef { definition: block_id, transform };
+        let entity = world.spawn((block_ref, Renderable, LayerRef(0)));
+
+        explode_block_insert(&mut world, &table, entity, &block_ref, &mut history).unwrap();
+
+        for (_e, arc) in &mut world.query::<&ArcData>() {
+            // 300° + 90° = 390°, rem_euclid 360 → 30°
+            assert!(
+                (arc.start_angle - 30.0).abs() < 1e-12,
+                "expected start_angle 30°, got {}",
+                arc.start_angle,
+            );
+            // 350° + 90° = 440°, rem_euclid 360 → 80°
+            assert!(
+                (arc.end_angle - 80.0).abs() < 1e-12,
+                "expected end_angle 80°, got {}",
+                arc.end_angle,
+            );
         }
     }
 

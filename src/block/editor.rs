@@ -58,9 +58,10 @@ impl BlockEditorState {
 
     /// Save the editing session and push a [`Transaction`] to history.
     ///
-    /// **Important:** `old_def` is captured **before**
-    /// [`BlockDef::compute_bounds`] is called, ensuring the undo record
-    /// preserves the pre-bounds-computation state.
+    /// The `old_def` for the undo record is built from the
+    /// [`original_entities`](Self::original_entities) snapshot taken at
+    /// [`enter()`](Self::enter) time, so that **undo correctly restores the
+    /// pre-edit entity list** rather than the already-modified state.
     ///
     /// # Panics
     ///
@@ -68,11 +69,20 @@ impl BlockEditorState {
     /// `block_table` (this should never happen if `enter()` was called
     /// with a valid block).
     pub fn save(&mut self, block_table: &mut BlockTable, history: &mut History) {
-        // Capture the old definition BEFORE bounds computation (critical).
-        let old_def = block_table
-            .get(self.editing_block)
-            .cloned()
-            .expect("BlockEditorState::save: editing block vanished from table");
+        // Build old_def from the pre-edit snapshot so undo restores the
+        // entity list from before editing began.
+        let old_def = {
+            let current = block_table
+                .get(self.editing_block)
+                .cloned()
+                .expect("BlockEditorState::save: editing block vanished from table");
+            let mut old = BlockDef {
+                entities: self.original_entities.clone(),
+                ..current
+            };
+            old.bounds = old.compute_bounds();
+            old
+        };
 
         // Recompute bounds on the current (user-modified) definition.
         if let Some(def) = block_table.get_mut(self.editing_block) {
@@ -268,10 +278,10 @@ mod tests {
                 new,
             } => {
                 assert_eq!(*id, block_id);
-                // old captures current state before bounds-update (2 entities)
-                assert_eq!(old.entities.len(), 2);
-                // new has same entities, only bounds changed
-                assert_eq!(new.entities.len(), 2);
+                // old is built from original_entities snapshot (1 entity)
+                assert_eq!(old.entities.len(), 1, "old_def should have pre-edit entities");
+                // new has the user-added entity (2 entities)
+                assert_eq!(new.entities.len(), 2, "new_def should have post-edit entities");
             }
             other => panic!("Expected ModifyBlockDef, got {other:?}"),
         }
@@ -315,6 +325,50 @@ mod tests {
         // Block 42 was never inserted
         let mut history = History::new();
         editor.save(&mut table, &mut history);
+    }
+
+    // ------------------------------------------------------------------
+    // save + undo round-trip: undo restores pre-edit entities
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_save_undo_restores_pre_edit_entities() {
+        use hecs::World;
+
+        let mut world = World::new();
+        let mut table = BlockTable::new();
+        let def = make_def("roundtrip", 0.0, 0.0);
+        let block_id = table.insert(def).unwrap();
+        let mut history = History::new();
+
+        // Enter editing
+        let mut editor = BlockEditorState::new();
+        editor.enter(block_id, table.get(block_id).unwrap());
+
+        // User adds a second entity during editing
+        if let Some(def) = table.get_mut(block_id) {
+            def.entities.push(BlockEntity::Circle(
+                Point2D::new(5.0, 5.0),
+                3.0,
+                PropertySource::ByLayer,
+                LayerRef(0),
+            ));
+            assert_eq!(def.entities.len(), 2);
+        }
+
+        // Save — old_def should capture the single pre-edit entity
+        editor.save(&mut table, &mut history);
+        assert!(history.can_undo());
+
+        // Undo — should restore the pre-edit single-entity state
+        history.undo(&mut world, &mut table);
+        let restored = table.get(block_id).unwrap();
+        assert_eq!(
+            restored.entities.len(),
+            1,
+            "undo should restore original single entity, got {}",
+            restored.entities.len(),
+        );
     }
 
     // ------------------------------------------------------------------
