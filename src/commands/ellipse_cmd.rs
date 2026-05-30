@@ -105,18 +105,19 @@ impl Command for EllipseCommand {
     fn on_input(&mut self, input: CommandInput, world: &mut World) -> CommandResult {
         match input {
             CommandInput::Point(p) => {
-                if self.center.is_none() {
-                    // Step 1: store center
-                    self.center = Some(p);
-                    CommandResult::Continue
-                } else if self.major_end.is_none() {
-                    // Step 2: store major axis endpoint
-                    self.major_end = Some(p);
-                    CommandResult::Continue
-                } else {
+                match (self.center, self.major_end) {
+                    (None, _) => {
+                        // Step 1: store center
+                        self.center = Some(p);
+                        CommandResult::Continue
+                    }
+                    (Some(_), None) => {
+                        // Step 2: store major axis endpoint
+                        self.major_end = Some(p);
+                        CommandResult::Continue
+                    }
+                    (Some(center), Some(major_end)) => {
                     // Step 3: compute minor ratio from point distance
-                    let center = self.center.unwrap();
-                    let major_end = self.major_end.unwrap();
                     let major_radius = center.distance(major_end);
                     let point_distance = center.distance(p);
                     let ratio = if major_radius > 0.0 {
@@ -146,14 +147,13 @@ impl Command for EllipseCommand {
                     });
 
                     CommandResult::CompleteWithTransaction(tx)
+                    }
                 }
             }
             CommandInput::Distance(d) => {
                 // Can be used for minor ratio in step 3
-                if self.center.is_some() && self.major_end.is_some() {
-                    let center = self.center.unwrap();
-                    let major_end = self.major_end.unwrap();
-                    let ratio = d.max(0.01).min(100.0);
+                if let (Some(center), Some(major_end)) = (self.center, self.major_end) {
+                    let ratio = d.clamp(0.01, 100.0);
 
                     let vertices = Self::compute_vertices(center, major_end, ratio, ELLIPSE_SEGMENTS);
 

@@ -306,6 +306,7 @@ impl PickingPass {
     /// (zoom-dependent, clamped to 8–64). This is generous enough to
     /// cover the visible geometry; picking may be slightly more permissive
     /// than the visual representation, which is acceptable for v0.2.0.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
