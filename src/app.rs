@@ -28,6 +28,7 @@ use crate::commands::{
     Command, CommandInput, CommandResult, CommandState, PendingModifyCommand,
 };
 use crate::ecs::resources::{CameraState, GridConfig, SnapConfig};
+use crate::block::definition::BlockTable;
 use crate::geometry::Point2D;
 use crate::history::{History, Transaction};
 use crate::layer::LayerTable;
@@ -88,6 +89,8 @@ pub struct ForgeApp {
     pub history: History,
     /// Layer table (layer properties for visual resolution).
     pub layer_table: LayerTable,
+    /// Block definition table (owned block definitions for undo/redo).
+    pub block_table: BlockTable,
     /// True when a GPU picking request is pending (consumed in render loop).
     pub needs_picking: bool,
     /// Active window selection drag state (None when not dragging).
@@ -127,6 +130,7 @@ impl ForgeApp {
         let spatial_index = SpatialIndex::new();
         let history = History::new();
         let layer_table = LayerTable::new();
+        let block_table = BlockTable::new();
         let needs_picking = false;
         let window_select_state = None;
 
@@ -142,6 +146,7 @@ impl ForgeApp {
             spatial_index,
             history,
             layer_table,
+            block_table,
             needs_picking,
             window_select_state,
         }

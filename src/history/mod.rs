@@ -25,7 +25,7 @@
 //! # Usage
 //!
 //! ```text
-//! // history.undo(&mut world) returns the label and updates EntityMapping
+//! // history.undo(&mut world, &mut BlockTable::new()) returns the label and updates EntityMapping
 //! // apply_entity_remapping(&mut selection, &mut spatial, &mapping)
 //! //   remaps stale entity handles after undo/redo
 //! ```
@@ -38,6 +38,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use hecs::Entity;
 use hecs::World;
 
+use crate::block::definition::BlockTable;
 use crate::ecs::components::Renderable;
 
 pub use self::ops::AtomicOp;
@@ -189,7 +190,7 @@ impl History {
     /// index are kept consistent.
     ///
     /// Returns the transaction's label, or `None` if the undo stack is empty.
-    pub fn undo(&mut self, world: &mut World) -> Option<String> {
+    pub fn undo(&mut self, world: &mut World, block_table: &mut BlockTable) -> Option<String> {
         let tx = self.undo_stack.pop_back()?;
 
         for op in tx.ops.iter().rev() {
@@ -251,6 +252,13 @@ impl History {
                 AtomicOp::SetPropertySource { entity, old, .. } => {
                     world.insert_one(*entity, *old).ok();
                 }
+
+                // Block definition — swap the stored old/new BlockDef
+                AtomicOp::ModifyBlockDef { block_id, old, .. } => {
+                    if let Some(def) = block_table.get_mut(*block_id) {
+                        *def = old.clone();
+                    }
+                }
             }
         }
 
@@ -278,7 +286,7 @@ impl History {
     /// [`apply_entity_remapping`].
     ///
     /// Returns the transaction's label, or `None` if the redo stack is empty.
-    pub fn redo(&mut self, world: &mut World) -> Option<String> {
+    pub fn redo(&mut self, world: &mut World, block_table: &mut BlockTable) -> Option<String> {
         let tx = self.redo_stack.pop_back()?;
 
         for op in &tx.ops {
@@ -349,6 +357,13 @@ impl History {
                 }
                 AtomicOp::SetPropertySource { entity, new, .. } => {
                     world.insert_one(*entity, *new).ok();
+                }
+
+                // Block definition — swap the stored old/new BlockDef
+                AtomicOp::ModifyBlockDef { block_id, new, .. } => {
+                    if let Some(def) = block_table.get_mut(*block_id) {
+                        *def = new.clone();
+                    }
                 }
             }
         }
@@ -569,7 +584,7 @@ mod tests {
         assert!(world.get::<&LineData>(entity).is_ok());
 
         // Undo → entity should be re-spawned (new handle)
-        let label = history.undo(&mut world);
+        let label = history.undo(&mut world, &mut BlockTable::new());
         assert_eq!(label.as_deref(), Some("despawn line"));
 
         let mapping = history.take_entity_mapping();
@@ -594,7 +609,7 @@ mod tests {
         history.push(tx);
 
         // Undo → re-spawn with cloned data
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         let mapping = history.take_entity_mapping();
         let remapped = mapping.map(entity);
         assert_ne!(remapped, entity);
@@ -636,14 +651,14 @@ mod tests {
         assert_eq!(current.start.x, 100.0);
 
         // Undo → should restore old_line
-        let label = history.undo(&mut world);
+        let label = history.undo(&mut world, &mut BlockTable::new());
         assert_eq!(label.as_deref(), Some("move line"));
         let restored = *world.get::<&LineData>(entity).unwrap();
         assert_eq!(restored.start.x, old_line.start.x);
         assert_eq!(restored.end.x, old_line.end.x);
 
         // Redo → should re-apply new_line
-        let label2 = history.redo(&mut world);
+        let label2 = history.redo(&mut world, &mut BlockTable::new());
         assert_eq!(label2.as_deref(), Some("move line"));
         let reapplied = *world.get::<&LineData>(entity).unwrap();
         assert_eq!(reapplied.start.x, 100.0);
@@ -664,7 +679,7 @@ mod tests {
         history.push(Transaction::new("tx2"));
 
         // Undo tx2
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         assert!(history.can_redo());
 
         // Push a new transaction → redo should be cleared
@@ -688,7 +703,7 @@ mod tests {
         assert_eq!(history.undo_label(), Some("tx3"));
 
         // After undo, tx2 becomes the top
-        history.undo(&mut World::new());
+        history.undo(&mut World::new(), &mut BlockTable::new());
         assert_eq!(history.undo_label(), Some("tx2"));
     }
 
@@ -727,11 +742,11 @@ mod tests {
         assert!(!history.can_redo());
 
         // After undo, can redo (and still undo if more exist)
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         assert!(history.can_redo());
 
         // After redo, can undo again
-        history.redo(&mut world);
+        history.redo(&mut world, &mut BlockTable::new());
         assert!(history.can_undo());
     }
 
@@ -866,7 +881,7 @@ mod tests {
         tx.push(AtomicOp::DespawnLine { entity, data });
         history.push(tx);
 
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         let mapping = history.take_entity_mapping();
 
         assert!(!mapping.is_empty(), "undo should produce entity mapping");
@@ -896,9 +911,9 @@ mod tests {
         // handle (stale after respawn), so `world.despawn` is a silent no-op.
         // This is correct — callers apply EntityMapping to fix up handles
         // when they care about the entity being truly gone.
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         let _first_mapping = history.take_entity_mapping();
-        let label = history.redo(&mut world);
+        let label = history.redo(&mut world, &mut BlockTable::new());
         assert_eq!(label.as_deref(), Some("despawn line"));
     }
 
@@ -945,22 +960,22 @@ mod tests {
         history.push(tx2);
 
         // Undo tx2 → mid
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         let current = *world.get::<&LineData>(entity).unwrap();
         assert_eq!(current.start.x, 100.0, "after undo tx2, should be mid");
 
         // Undo tx1 → orig
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         let current = *world.get::<&LineData>(entity).unwrap();
         assert_eq!(current.start.x, 0.0, "after undo tx1, should be orig");
 
         // Redo tx1 → mid
-        history.redo(&mut world);
+        history.redo(&mut world, &mut BlockTable::new());
         let current = *world.get::<&LineData>(entity).unwrap();
         assert_eq!(current.start.x, 100.0, "after redo tx1, should be mid");
 
         // Redo tx2 → final_
-        history.redo(&mut world);
+        history.redo(&mut world, &mut BlockTable::new());
         let current = *world.get::<&LineData>(entity).unwrap();
         assert_eq!(current.start.x, 300.0, "after redo tx2, should be final_");
     }
@@ -974,8 +989,8 @@ mod tests {
         let mut history = History::new();
         let mut world = World::new();
 
-        assert!(history.undo(&mut world).is_none());
-        assert!(history.redo(&mut world).is_none());
+        assert!(history.undo(&mut world, &mut BlockTable::new()).is_none());
+        assert!(history.redo(&mut world, &mut BlockTable::new()).is_none());
     }
 
     // ------------------------------------------------------------------
@@ -1011,13 +1026,13 @@ mod tests {
         history.push(tx);
 
         // Undo → restores old position
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         let pos = *world.get::<&Position>(entity).unwrap();
         assert_eq!(pos.0.x, 10.0);
         assert_eq!(pos.0.y, 20.0);
 
         // Redo → applies new position
-        history.redo(&mut world);
+        history.redo(&mut world, &mut BlockTable::new());
         let pos = *world.get::<&Position>(entity).unwrap();
         assert_eq!(pos.0.x, 100.0);
         assert_eq!(pos.0.y, 200.0);
@@ -1041,7 +1056,7 @@ mod tests {
         assert!(world.get::<&LineData>(entity).is_ok());
 
         // Undo → despawns the entity
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         assert!(world.get::<&LineData>(entity).is_err());
     }
 
@@ -1059,7 +1074,7 @@ mod tests {
         assert!(world.get::<&PolylineData>(entity).is_ok());
 
         // Undo → despawns the entity
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         assert!(world.get::<&PolylineData>(entity).is_err());
     }
 
@@ -1090,11 +1105,11 @@ mod tests {
         assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 10);
 
         // Undo → restores old layer ref
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 5);
 
         // Redo → applies new layer ref
-        history.redo(&mut world);
+        history.redo(&mut world, &mut BlockTable::new());
         assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 10);
     }
 
@@ -1118,11 +1133,11 @@ mod tests {
         history.push(tx);
 
         // Undo → removes the component
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         assert!(world.get::<&LayerRef>(entity).is_err());
 
         // Redo → re-inserts it
-        history.redo(&mut world);
+        history.redo(&mut world, &mut BlockTable::new());
         assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 7);
     }
 
@@ -1146,11 +1161,11 @@ mod tests {
         history.push(tx);
 
         // Undo → re-inserts the component
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         assert_eq!(world.get::<&LayerRef>(entity).unwrap().0, 3);
 
         // Redo → removes it again
-        history.redo(&mut world);
+        history.redo(&mut world, &mut BlockTable::new());
         assert!(world.get::<&LayerRef>(entity).is_err());
     }
 
@@ -1178,14 +1193,14 @@ mod tests {
         history.push(tx);
 
         // Undo → restores ByLayer
-        history.undo(&mut world);
+        history.undo(&mut world, &mut BlockTable::new());
         assert_eq!(
             *world.get::<&PropertySource>(entity).unwrap(),
             PropertySource::ByLayer
         );
 
         // Redo → re-applies Explicit
-        history.redo(&mut world);
+        history.redo(&mut world, &mut BlockTable::new());
         assert_eq!(
             *world.get::<&PropertySource>(entity).unwrap(),
             PropertySource::Explicit

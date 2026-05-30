@@ -112,6 +112,25 @@ impl Transform2D {
         Point2D::new(rx + self.translate_x, ry + self.translate_y)
     }
 
+    /// Apply the rotational component of this transform to an angle in degrees.
+    ///
+    /// This adds the transform's `rotation` to the angle (converting radians →
+    /// degrees internally), then normalises the result to `[0, 360)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use forge::geometry::{Point2D, Transform2D};
+    /// use std::f64::consts::FRAC_PI_2;
+    ///
+    /// let t = Transform2D::new(Point2D::new(0.0, 0.0), FRAC_PI_2, 1.0, 1.0);
+    /// assert!((t.apply_to_angle(0.0) - 90.0).abs() < 1e-12);
+    /// assert!((t.apply_to_angle(90.0) - 180.0).abs() < 1e-12);
+    /// ```
+    pub fn apply_to_angle(&self, angle_deg: f64) -> f64 {
+        (angle_deg + self.rotation.to_degrees()).rem_euclid(360.0)
+    }
+
     /// Apply this transform to every corner of a bounding box and return
     /// the union of the transformed corners.
     ///

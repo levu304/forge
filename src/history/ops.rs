@@ -15,6 +15,7 @@
 //!
 //! [`Transaction`]: super::transaction::Transaction
 
+use crate::block::definition::{BlockDef, BlockId};
 use crate::ecs::components::{
     ArcData, CircleData, LayerRef, LineData, PolylineData, Position, PropertySource,
 };
@@ -121,5 +122,20 @@ pub enum AtomicOp {
         entity: hecs::Entity,
         old: PropertySource,
         new: PropertySource,
+    },
+
+    // ------------------------------------------------------------------
+    // Block operations
+    // ------------------------------------------------------------------
+
+    /// A block definition was modified (editor save).
+    ///
+    /// This variant stores the full `BlockDef` snapshots so that
+    /// `History` can undo/redo without needing a reference to the
+    /// [`BlockManager`](crate::block::BlockManager).
+    ModifyBlockDef {
+        block_id: BlockId,
+        old: BlockDef,
+        new: BlockDef,
     },
 }
