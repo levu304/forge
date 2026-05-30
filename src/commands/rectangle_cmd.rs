@@ -5,9 +5,10 @@
 //! 2. Pick opposite corner.
 //!
 //! Spawns 4 [`LineData`] entities forming the rectangle perimeter.
-//! All entities get a [`LayerRef`] and [`PropertySource`] (defaults:
-//! LayerRef(0) / ByLayer). Builds a single [`Transaction`] for full
-//! undo/redo via the history system.
+//! Each entity is spawned with [`Renderable`], [`LayerRef`] (default 0),
+//! and [`PropertySource::ByLayer`] in a single bundle — matching the
+//! pattern used by POLYGON / ELLIPSE / SPLINE. Builds a single
+//! [`Transaction`] for full undo/redo via the history system.
 
 use crate::commands::{Command, CommandInput, CommandResult, PreviewEntity};
 use crate::ecs::components::{LayerRef, LineData, PropertySource, Renderable};
@@ -90,28 +91,13 @@ impl Command for RectangleCommand {
                                 width: 1.0,
                             },
                             Renderable,
+                            LayerRef(0),
+                            PropertySource::ByLayer,
                         ));
 
                         tx.push(AtomicOp::SpawnLine {
                             entity,
                             data: *world.get::<&LineData>(entity).unwrap(),
-                        });
-
-                        // Add LayerRef and PropertySource separately because
-                        // they were not part of the initial spawn bundle above.
-                        // We attach them now so the transaction captures them.
-                        let _ = world.insert_one(entity, LayerRef(0));
-                        tx.push(AtomicOp::SetLayerRef {
-                            entity,
-                            old: None,
-                            new: Some(LayerRef(0)),
-                        });
-
-                        let _ = world.insert_one(entity, PropertySource::ByLayer);
-                        tx.push(AtomicOp::SetPropertySource {
-                            entity,
-                            old: PropertySource::ByLayer,
-                            new: PropertySource::ByLayer,
                         });
                     }
 
@@ -180,8 +166,9 @@ mod tests {
             _ => panic!("Expected CompleteWithTransaction"),
         };
 
-        // Transaction should have 12 ops: 4 SpawnLine + 4 SetLayerRef + 4 SetPropertySource
-        assert_eq!(tx.ops.len(), 12);
+        // Transaction should have 4 ops: 4 SpawnLine (LayerRef + PropertySource
+        // are included in the spawn bundle, no separate SetLayerRef/SetPropertySource)
+        assert_eq!(tx.ops.len(), 4);
         assert_eq!(tx.label, "Rectangle");
     }
 

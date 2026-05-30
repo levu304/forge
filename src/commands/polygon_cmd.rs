@@ -22,8 +22,6 @@ pub struct PolygonCommand {
     center: Option<Point2D>,
     /// Number of sides (default 6, can be changed via set_sides).
     sides: u32,
-    /// Transaction if returning via CompleteWithTransaction.
-    pending_transaction: Option<Transaction>,
 }
 
 impl PolygonCommand {
@@ -32,7 +30,6 @@ impl PolygonCommand {
         Self {
             center: None,
             sides: 6,
-            pending_transaction: None,
         }
     }
 
@@ -159,15 +156,10 @@ impl Command for PolygonCommand {
 
     fn on_cancel(&mut self, _world: &mut World) {
         self.center = None;
-        self.pending_transaction = None;
     }
 
     fn preview(&self) -> Vec<PreviewEntity> {
         Vec::new()
-    }
-
-    fn take_transaction(&mut self) -> Option<Transaction> {
-        self.pending_transaction.take()
     }
 }
 
