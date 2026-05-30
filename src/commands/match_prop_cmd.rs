@@ -35,7 +35,7 @@ fn hit_test(world: &World, point: crate::geometry::Point2D) -> Option<Entity> {
     // Lines
     for (entity, line) in world.query::<&LineData>().iter() {
         let d = point_to_line_segment_distance(point, line.start, line.end);
-        if d < PICK_TOLERANCE && best.map_or(true, |(_, bd)| d < bd) {
+        if d < PICK_TOLERANCE && best.is_none_or(|(_, bd)| d < bd) {
             best = Some((entity, d));
         }
     }
@@ -46,7 +46,7 @@ fn hit_test(world: &World, point: crate::geometry::Point2D) -> Option<Entity> {
         let dy = point.y - circle.center.y;
         let d = (dx * dx + dy * dy).sqrt() - circle.radius;
         let d = d.abs();
-        if d < PICK_TOLERANCE && best.map_or(true, |(_, bd)| d < bd) {
+        if d < PICK_TOLERANCE && best.is_none_or(|(_, bd)| d < bd) {
             best = Some((entity, d));
         }
     }
@@ -61,7 +61,7 @@ fn hit_test(world: &World, point: crate::geometry::Point2D) -> Option<Entity> {
             // Also check angular range
             let angle = (point.y - arc.center.y).atan2(point.x - arc.center.x);
             let in_range = angle_in_range(angle, arc.start_angle, arc.end_angle);
-            if in_range && best.map_or(true, |(_, bd)| radius_dist < bd) {
+            if in_range && best.is_none_or(|(_, bd)| radius_dist < bd) {
                 best = Some((entity, radius_dist));
             }
         }
@@ -71,7 +71,7 @@ fn hit_test(world: &World, point: crate::geometry::Point2D) -> Option<Entity> {
     for (entity, poly) in world.query::<&PolylineData>().iter() {
         for window in poly.vertices.windows(2) {
             let d = point_to_line_segment_distance(point, window[0], window[1]);
-            if d < PICK_TOLERANCE && best.map_or(true, |(_, bd)| d < bd) {
+            if d < PICK_TOLERANCE && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((entity, d));
             }
         }
@@ -81,7 +81,7 @@ fn hit_test(world: &World, point: crate::geometry::Point2D) -> Option<Entity> {
                 *poly.vertices.last().unwrap(),
                 poly.vertices[0],
             );
-            if d < PICK_TOLERANCE && best.map_or(true, |(_, bd)| d < bd) {
+            if d < PICK_TOLERANCE && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((entity, d));
             }
         }

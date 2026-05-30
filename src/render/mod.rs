@@ -295,6 +295,6 @@ pub struct EntityRenderer {
 }
 
 impl EntityRenderer {
-    /// Initial staging buffer size in bytes (~1170 vertices at 28 bytes each).
+    /// Initial staging buffer size in bytes (~910 vertices at 36 bytes each).
     const INITIAL_STAGING_SIZE: u64 = 32768;
 }

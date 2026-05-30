@@ -20,8 +20,10 @@ use std::slice::from_ref;
 
 use super::EntityRenderer;
 use crate::ecs::components::{
-    ArcData, CircleData, LineData, PolylineData, Renderable, Selected,
+    ArcData, CircleData, LayerRef, LineData, PolylineData, Renderable, Selected,
 };
+use crate::layer::table::LayerTable;
+use crate::layer::LayerId;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -62,23 +64,29 @@ fn circle_segments_for_radius(radius: f64, zoom: f64) -> u32 {
 
 // ─── Vertex ──────────────────────────────────────────────────────────────────
 
-/// A single entity vertex: position + color + per-instance selection flag.
+/// A single entity vertex: position + color + selection flag + line direction.
 ///
 /// | Field         | Type      | Offset | Size |
 /// |---------------|-----------|--------|------|
 /// | `position`    | `vec2<f>` | 0      | 8    |
 /// | `color`       | `vec4<f>` | 8      | 16   |
 /// | `is_selected` | `u32`     | 24     | 4    |
-/// | **Total**     |           |        | 28   |
+/// | `line_dir`    | `vec2<f>` | 28     | 8    |
+/// | **Total**     |           |        | 36   |
 ///
 /// When `is_selected` is `1`, the fragment shader blends a blue tint
 /// (`mix(color, selection_blue, 0.3)`) to indicate selection state.
+///
+/// `line_dir` is a normalised per-vertex tangent direction. For lines and
+/// polylines this is the unit vector along the segment; for circles and arcs
+/// it is `[0, 0]` (reserved for v0.3.1+ curved-line effects).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub(super) struct EntityVertex {
     position: [f32; 2],
     color: [f32; 4],
     is_selected: u32,
+    line_dir: [f32; 2],
 }
 
 // ─── Helper: color array ────────────────────────────────────────────────────
@@ -87,6 +95,44 @@ pub(super) struct EntityVertex {
 #[inline]
 fn color_to_array(c: &crate::util::Color) -> [f32; 4] {
     [c.r, c.g, c.b, c.a]
+}
+
+// ─── Helper: layer culling check ─────────────────────────────────────────────
+
+/// Returns `true` when the entity's layer is hidden or frozen.
+///
+/// Entities without a `LayerRef` component are always visible (conservative
+/// default — ByLayer semantics fall back to the active layer which is visible).
+#[inline]
+fn is_layer_culled(
+    world: &hecs::World,
+    entity: hecs::Entity,
+    layer_table: &LayerTable,
+) -> bool {
+    if let Ok(lr) = world.get::<&LayerRef>(entity) {
+        layer_table
+            .get(LayerId(lr.0))
+            .map(|l| !l.visible || l.frozen)
+            .unwrap_or(false)
+    } else {
+        false
+    }
+}
+
+// ─── Helper: normalise direction vector ──────────────────────────────────────
+
+/// Normalise `(dx, dy)` to a unit `[f32; 2]`.
+///
+/// Returns `[0.0, 0.0]` when the segment has zero length (degenerate).
+#[inline]
+fn normalize_dir(dx: f64, dy: f64) -> [f32; 2] {
+    let len_sq = dx * dx + dy * dy;
+    if len_sq > f64::EPSILON {
+        let len = len_sq.sqrt();
+        [(dx / len) as f32, (dy / len) as f32]
+    } else {
+        [0.0, 0.0]
+    }
 }
 
 // ─── Helper: generate circle vertices ────────────────────────────────────────
@@ -118,6 +164,7 @@ fn generate_circle_vertices(
             position: [(cx + r * theta.cos()) as f32, (cy + r * theta.sin()) as f32],
             color: col,
             is_selected,
+            line_dir: [0.0, 0.0],
         });
     }
 }
@@ -162,6 +209,7 @@ fn generate_arc_vertices(
             position: [(cx + r * theta.cos()) as f32, (cy + r * theta.sin()) as f32],
             color: col,
             is_selected,
+            line_dir: [0.0, 0.0],
         });
     }
 }
@@ -192,9 +240,10 @@ impl EntityRenderer {
         // position:    vec2<f32> at location 0 (offset  0,  8 bytes)
         // color:       vec4<f32> at location 1 (offset  8, 16 bytes)
         // is_selected: u32       at location 2 (offset 24,  4 bytes)
-        // stride:   28 bytes
+        // line_dir:    vec2<f32> at location 3 (offset 28,  8 bytes)
+        // stride:    computed from size_of::<EntityVertex>()
         let vertex_buffer_layout = wgpu::VertexBufferLayout {
-            array_stride: 28,
+            array_stride: std::mem::size_of::<EntityVertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
                 wgpu::VertexAttribute {
@@ -211,6 +260,11 @@ impl EntityRenderer {
                     format: wgpu::VertexFormat::Uint32,
                     offset: 24,
                     shader_location: 2,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 28,
+                    shader_location: 3,
                 },
             ],
         };
@@ -340,6 +394,10 @@ impl EntityRenderer {
     /// buffer, and drawn in a single render pass.  Staging buffers are
     /// automatically doubled if they overflow.
     ///
+    /// Entities on layers that are hidden (`visible == false`) or frozen
+    /// (`frozen == true`) are skipped.  Entities without a `LayerRef`
+    /// component are rendered (conservative default).
+    ///
     /// # Parameters
     ///
     /// * `encoder` — Active command encoder for this frame.
@@ -351,6 +409,8 @@ impl EntityRenderer {
     /// * `queue` — Command queue (used for `write_buffer` on the staging buffers).
     /// * `device` — GPU device (used to re-create a staging buffer if it
     ///   needs to grow).
+    /// * `layer_table` — Layer table used to check entity visibility before
+    ///   generating vertices.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
@@ -361,6 +421,7 @@ impl EntityRenderer {
         camera_bind_group: &wgpu::BindGroup,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
+        layer_table: &LayerTable,
     ) {
         // ── 1. Build selection set ──────────────────────────────────────
         // Query all entities with the Selected marker component and collect
@@ -383,10 +444,16 @@ impl EntityRenderer {
 
         // ── 3. Collect vertices into scratch buffers ────────────────────
 
-        Self::collect_line_vertices(world, &selected, &mut self.line_scratch);
-        Self::collect_circle_vertices(world, zoom, &selected, &mut self.circle_scratch);
-        Self::collect_arc_vertices(world, zoom, &selected, &mut self.arc_scratch);
-        Self::collect_polyline_vertices(world, &selected, &mut self.polyline_scratch);
+        Self::collect_line_vertices(world, &selected, layer_table, &mut self.line_scratch);
+        Self::collect_circle_vertices(
+            world,
+            zoom,
+            &selected,
+            layer_table,
+            &mut self.circle_scratch,
+        );
+        Self::collect_arc_vertices(world, zoom, &selected, layer_table, &mut self.arc_scratch);
+        Self::collect_polyline_vertices(world, &selected, layer_table, &mut self.polyline_scratch);
 
         // ── 4. Upload to staging buffers (resize if needed) ──────────────
 
@@ -477,24 +544,40 @@ impl EntityRenderer {
     ///
     /// Appends 2 vertices (start, end) per entity to `out`.
     /// Sets `is_selected = 1` when the entity is in the selection set.
+    /// Computes `line_dir` as the normalised vector from start to end
+    /// (falls back to `[0, 0]` for zero-length lines).
+    /// Skips entities whose layer is hidden or frozen.
     fn collect_line_vertices(
         world: &hecs::World,
         selected: &HashSet<hecs::Entity>,
+        layer_table: &LayerTable,
         out: &mut Vec<EntityVertex>,
     ) {
         let mut query = world.query::<(&LineData, &Renderable)>();
         for (entity, (line, _)) in query.iter() {
+            if is_layer_culled(world, entity, layer_table) {
+                continue;
+            }
+
             let col = color_to_array(&line.color);
             let is_sel = u32::from(selected.contains(&entity));
+
+            // line_dir = normalize(end - start), guard against zero length.
+            let dx = line.end.x - line.start.x;
+            let dy = line.end.y - line.start.y;
+            let line_dir = normalize_dir(dx, dy);
+
             out.push(EntityVertex {
                 position: line.start.to_f32_array(),
                 color: col,
                 is_selected: is_sel,
+                line_dir,
             });
             out.push(EntityVertex {
                 position: line.end.to_f32_array(),
                 color: col,
                 is_selected: is_sel,
+                line_dir,
             });
         }
     }
@@ -505,14 +588,20 @@ impl EntityRenderer {
     /// The `zoom` parameter controls tessellation density (more zoom → more
     /// segments for large circles). Sets `is_selected = 1` when the entity
     /// is in the selection set.
+    /// Skips entities whose layer is hidden or frozen.
     fn collect_circle_vertices(
         world: &hecs::World,
         zoom: f64,
         selected: &HashSet<hecs::Entity>,
+        layer_table: &LayerTable,
         out: &mut Vec<EntityVertex>,
     ) {
         let mut query = world.query::<(&CircleData, &Renderable)>();
         for (entity, (circle, _)) in query.iter() {
+            if is_layer_culled(world, entity, layer_table) {
+                continue;
+            }
+
             let is_sel = u32::from(selected.contains(&entity));
             generate_circle_vertices(circle, zoom, is_sel, out);
         }
@@ -523,14 +612,20 @@ impl EntityRenderer {
     /// Calls `generate_arc_vertices` for each arc and appends to `out`.
     /// The `zoom` parameter controls tessellation density. Sets
     /// `is_selected = 1` when the entity is in the selection set.
+    /// Skips entities whose layer is hidden or frozen.
     fn collect_arc_vertices(
         world: &hecs::World,
         zoom: f64,
         selected: &HashSet<hecs::Entity>,
+        layer_table: &LayerTable,
         out: &mut Vec<EntityVertex>,
     ) {
         let mut query = world.query::<(&ArcData, &Renderable)>();
         for (entity, (arc, _)) in query.iter() {
+            if is_layer_culled(world, entity, layer_table) {
+                continue;
+            }
+
             let is_sel = u32::from(selected.contains(&entity));
             generate_arc_vertices(arc, zoom, is_sel, out);
         }
@@ -541,35 +636,73 @@ impl EntityRenderer {
     /// Emits one vertex per point for each polyline; if `closed` and has
     /// at least 2 vertices, emits the first vertex again to close the loop.
     /// Sets `is_selected = 1` when the entity is in the selection set.
+    /// Computes `line_dir` per vertex as the normalised direction toward the
+    /// next point; the last vertex in an open polyline reuses the last
+    /// segment's direction.  Falls back to `[0, 0]` for degenerate segments.
+    /// Skips entities whose layer is hidden or frozen.
     ///
     /// Entities with an empty vertex list are silently skipped to prevent
     /// degenerate buffer ranges.
     fn collect_polyline_vertices(
         world: &hecs::World,
         selected: &HashSet<hecs::Entity>,
+        layer_table: &LayerTable,
         out: &mut Vec<EntityVertex>,
     ) {
         let mut query = world.query::<(&PolylineData, &Renderable)>();
         for (entity, (poly, _)) in query.iter() {
+            if is_layer_culled(world, entity, layer_table) {
+                continue;
+            }
+
             if poly.vertices.is_empty() {
                 continue;
             }
             let col = color_to_array(&poly.color);
             let is_sel = u32::from(selected.contains(&entity));
-            // Emit one vertex per point.
-            for point in &poly.vertices {
+
+            // ── Per-vertex line_dir ────────────────────────────────────
+            // Each vertex gets the direction toward the next point.
+            // The last vertex in an open polyline uses the previous segment.
+            // For a closed polyline, the last interior vertex points to the
+            // first vertex (the closing segment).
+            let points = &poly.vertices;
+            for i in 0..points.len() {
+                let (dx, dy) = if i + 1 < points.len() {
+                    // Direction from this point to the next.
+                    (points[i + 1].x - points[i].x, points[i + 1].y - points[i].y)
+                } else if poly.closed && points.len() > 1 {
+                    // Closed polyline: last interior vertex points back
+                    // to the first vertex (closing segment).
+                    (points[0].x - points[i].x, points[0].y - points[i].y)
+                } else if i > 0 {
+                    // Open polyline last vertex: reuse previous segment.
+                    (points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
+                } else {
+                    (0.0, 0.0) // Single vertex
+                };
+                let line_dir = normalize_dir(dx, dy);
                 out.push(EntityVertex {
-                    position: point.to_f32_array(),
+                    position: points[i].to_f32_array(),
                     color: col,
                     is_selected: is_sel,
+                    line_dir,
                 });
             }
-            // If closed, emit the first vertex again to close the loop.
-            if poly.closed && poly.vertices.len() > 1 {
+
+            // If closed, emit the first vertex again — its line_dir points
+            // from the last vertex back to the first.
+            if poly.closed && points.len() > 1 {
+                let last = points.last().unwrap();
+                let first = &points[0];
+                let dx = first.x - last.x;
+                let dy = first.y - last.y;
+                let line_dir = normalize_dir(dx, dy);
                 out.push(EntityVertex {
-                    position: poly.vertices[0].to_f32_array(),
+                    position: first.to_f32_array(),
                     color: col,
                     is_selected: is_sel,
+                    line_dir,
                 });
             }
         }
@@ -631,6 +764,7 @@ mod tests {
     use super::*;
     use crate::ecs::components::{ArcData, CircleData, PolylineData};
     use crate::geometry::Point2D;
+    use crate::layer::table::LayerTable;
     use crate::util::Color;
 
     // ── circle_segments_for_radius ─────────────────────────────────────────
@@ -804,9 +938,10 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let selected = HashSet::new();
         let mut buf = Vec::new();
-        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &layer_table, &mut buf);
 
         // Only the non-empty polyline should produce vertices (2 points).
         assert_eq!(buf.len(), 2);
@@ -827,9 +962,10 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let selected = HashSet::new();
         let mut buf = Vec::new();
-        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &layer_table, &mut buf);
         assert!(buf.is_empty());
     }
 
@@ -858,9 +994,10 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let selected = HashSet::new();
         let mut buf = Vec::new();
-        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+        EntityRenderer::collect_line_vertices(&world, &selected, &layer_table, &mut buf);
 
         // 2 lines × 2 vertices each = 4
         assert_eq!(buf.len(), 4);
@@ -882,11 +1019,12 @@ mod tests {
         ));
         world.insert_one(entity, Selected).ok();
 
+        let layer_table = LayerTable::new();
         let mut selected = HashSet::new();
         selected.insert(entity);
 
         let mut buf = Vec::new();
-        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+        EntityRenderer::collect_line_vertices(&world, &selected, &layer_table, &mut buf);
 
         assert_eq!(buf.len(), 2, "one line should produce 2 vertices");
         for v in &buf {
@@ -908,10 +1046,11 @@ mod tests {
         ));
         // entity does NOT get Selected component, and is NOT in the selection set.
 
+        let layer_table = LayerTable::new();
         let selected = HashSet::new(); // empty — entity is not selected
 
         let mut buf = Vec::new();
-        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+        EntityRenderer::collect_line_vertices(&world, &selected, &layer_table, &mut buf);
 
         assert_eq!(buf.len(), 2);
         for v in &buf {
@@ -942,11 +1081,12 @@ mod tests {
         ));
         world.insert_one(sel_entity, Selected).ok();
 
+        let layer_table = LayerTable::new();
         let mut selected = HashSet::new();
         selected.insert(sel_entity);
 
         let mut buf = Vec::new();
-        EntityRenderer::collect_line_vertices(&world, &selected, &mut buf);
+        EntityRenderer::collect_line_vertices(&world, &selected, &layer_table, &mut buf);
 
         // Two lines → 4 vertices. Count by selection flag (order-independent).
         assert_eq!(buf.len(), 4, "2 lines should produce 4 vertices");
@@ -970,11 +1110,12 @@ mod tests {
         ));
         world.insert_one(entity, Selected).ok();
 
+        let layer_table = LayerTable::new();
         let mut selected = HashSet::new();
         selected.insert(entity);
 
         let mut buf = Vec::new();
-        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &mut buf);
+        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &layer_table, &mut buf);
 
         assert!(!buf.is_empty(), "circle should produce vertices");
         for v in &buf {
@@ -995,9 +1136,10 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let selected = HashSet::new();
         let mut buf = Vec::new();
-        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &mut buf);
+        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &layer_table, &mut buf);
 
         assert!(!buf.is_empty());
         for v in &buf {
@@ -1023,11 +1165,12 @@ mod tests {
         ));
         world.insert_one(entity, Selected).ok();
 
+        let layer_table = LayerTable::new();
         let mut selected = HashSet::new();
         selected.insert(entity);
 
         let mut buf = Vec::new();
-        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &layer_table, &mut buf);
 
         assert_eq!(buf.len(), 3, "open polyline with 3 points should produce 3 vertices");
         for v in &buf {
@@ -1051,13 +1194,617 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let selected = HashSet::new();
         let mut buf = Vec::new();
-        EntityRenderer::collect_polyline_vertices(&world, &selected, &mut buf);
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &layer_table, &mut buf);
 
         assert_eq!(buf.len(), 2);
         for v in &buf {
             assert_eq!(v.is_selected, 0, "non-selected polyline vertices should have is_selected=0");
         }
+    }
+
+    // ── EntityVertex size ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_entity_vertex_size_is_36() {
+        assert_eq!(
+            std::mem::size_of::<EntityVertex>(),
+            36,
+            "EntityVertex must be exactly 36 bytes (28 + 8 for line_dir)"
+        );
+    }
+
+    #[test]
+    fn test_entity_vertex_offset_of_line_dir() {
+        let v = EntityVertex {
+            position: [1.0, 2.0],
+            color: [3.0, 4.0, 5.0, 6.0],
+            is_selected: 7,
+            line_dir: [8.0, 9.0],
+        };
+        // line_dir should be at byte offset 28.
+        let bytes: &[u8] = bytemuck::bytes_of(&v);
+        let line_dir_start = 28;
+        let dir_x = f32::from_ne_bytes([
+            bytes[line_dir_start],
+            bytes[line_dir_start + 1],
+            bytes[line_dir_start + 2],
+            bytes[line_dir_start + 3],
+        ]);
+        let dir_y = f32::from_ne_bytes([
+            bytes[line_dir_start + 4],
+            bytes[line_dir_start + 5],
+            bytes[line_dir_start + 6],
+            bytes[line_dir_start + 7],
+        ]);
+        assert!((dir_x - 8.0).abs() < f32::EPSILON, "line_dir.x at offset 28");
+        assert!((dir_y - 9.0).abs() < f32::EPSILON, "line_dir.y at offset 32");
+    }
+
+    // ── line_dir correctness for Line entities ─────────────────────────────
+
+    #[test]
+    fn test_line_vertices_have_line_dir() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 0.0), // horizontal right
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let layer_table = LayerTable::new();
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &layer_table, &mut buf);
+
+        assert_eq!(buf.len(), 2, "one line → 2 vertices");
+        for v in &buf {
+            assert!((v.line_dir[0] - 1.0).abs() < f32::EPSILON, "line_dir.x should be 1.0 for (10,0)");
+            assert!((v.line_dir[1] - 0.0).abs() < f32::EPSILON, "line_dir.y should be 0.0 for horizontal line");
+        }
+    }
+
+    #[test]
+    fn test_line_vertices_diagonal_dir() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(3.0, 4.0), // 5-unit diagonal
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let layer_table = LayerTable::new();
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &layer_table, &mut buf);
+
+        assert_eq!(buf.len(), 2);
+        // normalize(3,4) = (0.6, 0.8)
+        for v in &buf {
+            assert!((v.line_dir[0] - 0.6).abs() < 1e-6, "line_dir.x should be 0.6, got {}", v.line_dir[0]);
+            assert!((v.line_dir[1] - 0.8).abs() < 1e-6, "line_dir.y should be 0.8, got {}", v.line_dir[1]);
+        }
+    }
+
+    // ── Zero-length line guard ─────────────────────────────────────────────
+
+    #[test]
+    fn test_zero_length_line_has_zero_dir() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            LineData {
+                start: Point2D::new(5.0, 5.0),
+                end: Point2D::new(5.0, 5.0), // same point → zero length
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let layer_table = LayerTable::new();
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &layer_table, &mut buf);
+
+        assert_eq!(buf.len(), 2, "zero-length line still produces 2 vertices");
+        for v in &buf {
+            assert_eq!(v.line_dir, [0.0, 0.0], "zero-length line should have [0,0] dir");
+        }
+    }
+
+    // ── line_dir for Polyline entities ─────────────────────────────────────
+
+    #[test]
+    fn test_polyline_vertices_have_per_segment_dir() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            PolylineData {
+                vertices: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(10.0, 0.0),  // segment 0: right
+                    Point2D::new(10.0, 10.0), // segment 1: up
+                ],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let layer_table = LayerTable::new();
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &layer_table, &mut buf);
+
+        // 3 points → 3 vertices (open polyline)
+        assert_eq!(buf.len(), 3);
+        // Point 0 → direction to point 1 = (1, 0)
+        assert!((buf[0].line_dir[0] - 1.0).abs() < f32::EPSILON);
+        assert!((buf[0].line_dir[1] - 0.0).abs() < f32::EPSILON);
+        // Point 1 → direction to point 2 = (0, 1)
+        assert!((buf[1].line_dir[0] - 0.0).abs() < f32::EPSILON);
+        assert!((buf[1].line_dir[1] - 1.0).abs() < f32::EPSILON);
+        // Point 2 (last) → reuses direction from previous segment = (0, 1)
+        assert!((buf[2].line_dir[0] - 0.0).abs() < f32::EPSILON);
+        assert!((buf[2].line_dir[1] - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_polyline_closed_loop_dir() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            PolylineData {
+                vertices: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(10.0, 0.0),
+                    Point2D::new(10.0, 10.0),
+                ],
+                closed: true,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let layer_table = LayerTable::new();
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &layer_table, &mut buf);
+
+        // 3 points + 1 closing vertex = 4 vertices for closed polyline
+        assert_eq!(buf.len(), 4);
+
+        // Interior vertex C (index 2) = (10,10), direction toward A (0,0)
+        // = normalize(-10, -10) ≈ (-0.707, -0.707)
+        let expected = -std::f64::consts::FRAC_1_SQRT_2 as f32;
+        assert!((buf[2].line_dir[0] - expected).abs() < 1e-6,
+            "interior vertex C line_dir.x should be {}, got {}", expected, buf[2].line_dir[0]);
+        assert!((buf[2].line_dir[1] - expected).abs() < 1e-6,
+            "interior vertex C line_dir.y should be {}, got {}", expected, buf[2].line_dir[1]);
+
+        // Closing vertex (index 3) = first point, direction from last→first
+        // last = (10,10), first = (0,0) → same direction
+        assert!((buf[3].line_dir[0] - expected).abs() < 1e-6,
+            "closing vertex line_dir.x should be {}, got {}", expected, buf[3].line_dir[0]);
+        assert!((buf[3].line_dir[1] - expected).abs() < 1e-6,
+            "closing vertex line_dir.y should be {}, got {}", expected, buf[3].line_dir[1]);
+    }
+
+    // ── line_dir for Circle / Arc (placeholder) ────────────────────────────
+
+    #[test]
+    fn test_circle_vertices_line_dir_is_zero() {
+        let circle = CircleData {
+            center: Point2D::new(0.0, 0.0),
+            radius: 10.0,
+            color: Color::WHITE,
+            width: 1.0,
+        };
+
+        let mut buf = Vec::new();
+        generate_circle_vertices(&circle, 1.0, 0, &mut buf);
+
+        assert!(!buf.is_empty());
+        for v in &buf {
+            assert_eq!(v.line_dir, [0.0, 0.0], "circle vertices should have [0,0] line_dir");
+        }
+    }
+
+    #[test]
+    fn test_arc_vertices_line_dir_is_zero() {
+        let arc = ArcData {
+            center: Point2D::new(0.0, 0.0),
+            radius: 50.0,
+            start_angle: 0.0,
+            end_angle: 90.0,
+            color: Color::WHITE,
+            width: 1.0,
+        };
+
+        let mut buf = Vec::new();
+        generate_arc_vertices(&arc, 1.0, 0, &mut buf);
+
+        assert!(!buf.is_empty());
+        for v in &buf {
+            assert_eq!(v.line_dir, [0.0, 0.0], "arc vertices should have [0,0] line_dir");
+        }
+    }
+
+    // ── Layer culling ──────────────────────────────────────────────────────
+
+    /// Helper: create a world with one line entity on the default layer.
+    fn make_line_world() -> (hecs::World, hecs::Entity) {
+        let mut world = hecs::World::new();
+        let e = world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 0.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        (world, e)
+    }
+
+    #[test]
+    fn test_layer_culling_visible_line_passes() {
+        let (world, _e) = make_line_world();
+        // Default layer (ID 0) is visible and not frozen by default.
+
+        let mut table = LayerTable::new();
+        // Default layer properties: visible=true, frozen=false
+        let layer = table.get(LayerId::DEFAULT).unwrap();
+        assert!(layer.visible, "default layer should be visible");
+        assert!(!layer.frozen, "default layer should not be frozen");
+
+        let layer_table = &table;
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, layer_table, &mut buf);
+
+        // Entity has no LayerRef component → .unwrap_or(true) keeps it visible.
+        assert_eq!(buf.len(), 2, "entity without LayerRef should be rendered");
+    }
+
+    #[test]
+    fn test_layer_culling_entity_with_layer_ref_on_visible_layer() {
+        let (mut world, e) = make_line_world();
+        // Attach a LayerRef pointing to the default layer (ID 0).
+        world.insert_one(e, LayerRef(0)).ok();
+
+        let table = LayerTable::new();
+        // Default layer is visible and not frozen.
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_line_vertices(
+            &world,
+            &selected,
+            &table,
+            &mut buf,
+        );
+
+        assert_eq!(
+            buf.len(),
+            2,
+            "entity on visible layer should produce vertices"
+        );
+    }
+
+    #[test]
+    fn test_layer_culling_hidden_layer_skips_entity() {
+        let (mut world, e) = make_line_world();
+        world.insert_one(e, LayerRef(0)).ok();
+
+        let mut table = LayerTable::new();
+        // Hide the default layer.
+        let default = table.get_mut(LayerId::DEFAULT).unwrap();
+        default.visible = false;
+
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_line_vertices(
+            &world,
+            &selected,
+            &table,
+            &mut buf,
+        );
+
+        assert!(
+            buf.is_empty(),
+            "entity on hidden layer should be culled"
+        );
+    }
+
+    #[test]
+    fn test_layer_culling_frozen_layer_skips_entity() {
+        let (mut world, e) = make_line_world();
+        world.insert_one(e, LayerRef(0)).ok();
+
+        let mut table = LayerTable::new();
+        // Freeze the default layer.
+        let default = table.get_mut(LayerId::DEFAULT).unwrap();
+        default.frozen = true;
+
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_line_vertices(
+            &world,
+            &selected,
+            &table,
+            &mut buf,
+        );
+
+        assert!(
+            buf.is_empty(),
+            "entity on frozen layer should be culled"
+        );
+    }
+
+    #[test]
+    fn test_layer_culling_missing_layer_renders_conservatively() {
+        // Entity references a layer ID that doesn't exist in the table.
+        // The lookup returns None → .unwrap_or(true) should keep it visible.
+
+        let (mut world, e) = make_line_world();
+        world.insert_one(e, LayerRef(999)).ok(); // non-existent layer
+
+        let table = LayerTable::new(); // only has default layer (ID 0)
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_line_vertices(
+            &world,
+            &selected,
+            &table,
+            &mut buf,
+        );
+
+        assert_eq!(
+            buf.len(),
+            2,
+            "entity referencing missing layer should be rendered (conservative)"
+        );
+    }
+
+    // ── Layer culling: Circle ──────────────────────────────────────────────
+
+    #[test]
+    fn test_layer_culling_hidden_layer_skips_circle() {
+        let mut world = hecs::World::new();
+        let e = world.spawn((
+            CircleData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 10.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(e, LayerRef(0)).ok();
+
+        let mut table = LayerTable::new();
+        table.get_mut(LayerId::DEFAULT).unwrap().visible = false;
+
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &table, &mut buf);
+        assert!(buf.is_empty(), "circle on hidden layer should be culled");
+    }
+
+    #[test]
+    fn test_layer_culling_frozen_layer_skips_circle() {
+        let mut world = hecs::World::new();
+        let e = world.spawn((
+            CircleData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 10.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(e, LayerRef(0)).ok();
+
+        let mut table = LayerTable::new();
+        table.get_mut(LayerId::DEFAULT).unwrap().frozen = true;
+
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_circle_vertices(&world, 1.0, &selected, &table, &mut buf);
+        assert!(buf.is_empty(), "circle on frozen layer should be culled");
+    }
+
+    // ── Layer culling: Arc ────────────────────────────────────────────────
+
+    #[test]
+    fn test_layer_culling_hidden_layer_skips_arc() {
+        let mut world = hecs::World::new();
+        let e = world.spawn((
+            ArcData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 10.0,
+                start_angle: 0.0,
+                end_angle: 90.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(e, LayerRef(0)).ok();
+
+        let mut table = LayerTable::new();
+        table.get_mut(LayerId::DEFAULT).unwrap().visible = false;
+
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_arc_vertices(&world, 1.0, &selected, &table, &mut buf);
+        assert!(buf.is_empty(), "arc on hidden layer should be culled");
+    }
+
+    #[test]
+    fn test_layer_culling_frozen_layer_skips_arc() {
+        let mut world = hecs::World::new();
+        let e = world.spawn((
+            ArcData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 10.0,
+                start_angle: 0.0,
+                end_angle: 90.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(e, LayerRef(0)).ok();
+
+        let mut table = LayerTable::new();
+        table.get_mut(LayerId::DEFAULT).unwrap().frozen = true;
+
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_arc_vertices(&world, 1.0, &selected, &table, &mut buf);
+        assert!(buf.is_empty(), "arc on frozen layer should be culled");
+    }
+
+    // ── Layer culling: Polyline ───────────────────────────────────────────
+
+    #[test]
+    fn test_layer_culling_hidden_layer_skips_polyline() {
+        let mut world = hecs::World::new();
+        let e = world.spawn((
+            PolylineData {
+                vertices: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(10.0, 0.0),
+                ],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(e, LayerRef(0)).ok();
+
+        let mut table = LayerTable::new();
+        table.get_mut(LayerId::DEFAULT).unwrap().visible = false;
+
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &table, &mut buf);
+        assert!(buf.is_empty(), "polyline on hidden layer should be culled");
+    }
+
+    #[test]
+    fn test_layer_culling_frozen_layer_skips_polyline() {
+        let mut world = hecs::World::new();
+        let e = world.spawn((
+            PolylineData {
+                vertices: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(10.0, 0.0),
+                ],
+                closed: false,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(e, LayerRef(0)).ok();
+
+        let mut table = LayerTable::new();
+        table.get_mut(LayerId::DEFAULT).unwrap().frozen = true;
+
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_polyline_vertices(&world, &selected, &table, &mut buf);
+        assert!(buf.is_empty(), "polyline on frozen layer should be culled");
+    }
+
+    // ── Layer culling: mixed visible + hidden in same world ────────────────
+
+    #[test]
+    fn test_layer_culling_mixed_visible_hidden() {
+        let mut world = hecs::World::new();
+
+        // Entity on hidden layer.
+        let hidden_e = world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(10.0, 0.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+        world.insert_one(hidden_e, LayerRef(0)).ok();
+
+        // Entity on visible layer (default, no LayerRef).
+        world.spawn((
+            LineData {
+                start: Point2D::new(100.0, 0.0),
+                end: Point2D::new(110.0, 0.0),
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let mut table = LayerTable::new();
+        table.get_mut(LayerId::DEFAULT).unwrap().visible = false;
+
+        let mut buf = Vec::new();
+        let selected = HashSet::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &table, &mut buf);
+
+        // Entity without LayerRef is always visible (conservative default).
+        assert_eq!(buf.len(), 2, "entity without LayerRef should still render");
+        assert!(
+            buf.iter().all(|v| v.position == [100.0, 0.0] || v.position == [110.0, 0.0]),
+            "only visible entity vertices should be in the buffer"
+        );
+    }
+
+    // ── line_dir: vertical line ────────────────────────────────────────────
+
+    #[test]
+    fn test_line_vertices_vertical_dir() {
+        let mut world = hecs::World::new();
+        world.spawn((
+            LineData {
+                start: Point2D::new(0.0, 0.0),
+                end: Point2D::new(0.0, 10.0), // vertical up
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Renderable,
+        ));
+
+        let layer_table = LayerTable::new();
+        let selected = HashSet::new();
+        let mut buf = Vec::new();
+        EntityRenderer::collect_line_vertices(&world, &selected, &layer_table, &mut buf);
+
+        assert_eq!(buf.len(), 2);
+        // normalize(0, 10) = (0, 1)
+        assert!(
+            (buf[0].line_dir[0] - 0.0).abs() < f32::EPSILON,
+            "vertical line line_dir.x should be 0.0, got {}",
+            buf[0].line_dir[0]
+        );
+        assert!(
+            (buf[0].line_dir[1] - 1.0).abs() < f32::EPSILON,
+            "vertical line line_dir.y should be 1.0, got {}",
+            buf[0].line_dir[1]
+        );
     }
 }

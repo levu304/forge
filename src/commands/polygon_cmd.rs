@@ -80,13 +80,14 @@ impl Command for PolygonCommand {
     fn on_input(&mut self, input: CommandInput, world: &mut World) -> CommandResult {
         match input {
             CommandInput::Point(p) => {
-                if self.center.is_none() {
-                    // Step 1: store center
-                    self.center = Some(p);
-                    CommandResult::Continue
-                } else {
+                match self.center {
+                    None => {
+                        // Step 1: store center
+                        self.center = Some(p);
+                        CommandResult::Continue
+                    }
+                    Some(center) => {
                     // Step 2: use point as radius (distance from center)
-                    let center = self.center.unwrap();
                     let radius = center.distance(p);
                     let vertices = Self::compute_vertices(center, radius, self.sides);
 
@@ -113,6 +114,7 @@ impl Command for PolygonCommand {
                     });
 
                     CommandResult::CompleteWithTransaction(tx)
+                    }
                 }
             }
             CommandInput::Distance(d) => {

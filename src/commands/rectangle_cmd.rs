@@ -58,13 +58,14 @@ impl Command for RectangleCommand {
     fn on_input(&mut self, input: CommandInput, world: &mut World) -> CommandResult {
         match input {
             CommandInput::Point(p) => {
-                if self.first_corner.is_none() {
-                    // Step 1: store first corner
-                    self.first_corner = Some(p);
-                    CommandResult::Continue
-                } else {
+                match self.first_corner {
+                    None => {
+                        // Step 1: store first corner
+                        self.first_corner = Some(p);
+                        CommandResult::Continue
+                    }
+                    Some(first) => {
                     // Step 2: compute rectangle and spawn entities
-                    let first = self.first_corner.unwrap();
                     let second = p;
 
                     // Compute 4 corners in order: bottom-left, bottom-right,
@@ -102,6 +103,7 @@ impl Command for RectangleCommand {
                     }
 
                     CommandResult::CompleteWithTransaction(tx)
+                    }
                 }
             }
             CommandInput::Cancel => {
