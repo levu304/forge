@@ -21,14 +21,13 @@ pub use insert::{BlockInsert, BlockRef};
 
 /// Thin owning wrapper around [`BlockTable`].
 ///
-/// Provides direct access to the underlying table via the `table` field and
-/// delegates common CRUD operations.  This wrapper exists so that the block
-/// subsystem can be swapped or extended without changing the public API
-/// surface.
+/// Exposes the underlying table via the read-only [`BlockManager::table`]
+/// accessor and delegates common CRUD operations.  This wrapper exists so
+/// that the block subsystem can be swapped or extended without changing the
+/// public API surface.
 #[derive(Debug, Clone)]
 pub struct BlockManager {
-    /// The underlying block definition table.
-    pub table: BlockTable,
+    table: BlockTable,
 }
 
 impl BlockManager {
@@ -37,6 +36,11 @@ impl BlockManager {
         Self {
             table: BlockTable::new(),
         }
+    }
+
+    /// Immutably borrow the inner [`BlockTable`].
+    pub fn table(&self) -> &BlockTable {
+        &self.table
     }
 
     // ------------------------------------------------------------------

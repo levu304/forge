@@ -153,11 +153,11 @@ pub enum BlockError {
 #[derive(Debug, Clone)]
 pub struct BlockTable {
     /// Primary storage: block ID → definition.
-    pub definitions: HashMap<BlockId, BlockDef>,
+    definitions: HashMap<BlockId, BlockDef>,
     /// Reverse lookup: name → block ID (enforces name uniqueness).
-    pub name_to_id: HashMap<String, BlockId>,
+    name_to_id: HashMap<String, BlockId>,
     /// Next auto-incrementing ID to assign.
-    pub next_id: u32,
+    next_id: u32,
 }
 
 impl BlockTable {
