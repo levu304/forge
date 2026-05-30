@@ -105,6 +105,11 @@ impl Command for ExplodeCommand {
                         .unwrap_or(LayerRef(0));
 
                     let transform = instance.transform;
+                    debug_assert!(
+                        (transform.scale_x - transform.scale_y).abs() < f64::EPSILON,
+                        "EXPLODE circle/arc radius scaling does not support non-uniform block transforms (scale_x={}, scale_y={}). Non-uniform scale handling deferred to v0.3.1.",
+                        transform.scale_x, transform.scale_y,
+                    );
                     let scale_x = transform.scale_x;
 
                     for block_entity in &instance.def_entities {

@@ -36,8 +36,9 @@ use crate::util::Color;
 ///
 /// * `Line` / `Polyline` vertices — each point is transformed via
 ///   [`Transform2D::apply_to_point`](crate::geometry::Transform2D::apply_to_point).
-/// * `Circle` / `Arc` radius — scaled by `transform.scale_x` (uniform scale
-///   assumption per spec).
+/// * `Circle` / `Arc` radius — scaled by `transform.scale_x`. Non-uniform
+///   scale handling (scale_x != scale_y) for circle/arc radius is deferred
+///   to v0.3.1 — a `debug_assert!` enforces uniform scale for now.
 /// * `Circle` / `Arc` center — transformed via `apply_to_point`.
 pub fn explode_block_insert(
     world: &mut World,
@@ -58,6 +59,11 @@ pub fn explode_block_insert(
         .unwrap_or(LayerRef(0));
 
     let transform = block_ref.transform;
+    debug_assert!(
+        (transform.scale_x - transform.scale_y).abs() < f64::EPSILON,
+        "EXPLODE circle/arc radius scaling does not support non-uniform block transforms (scale_x={}, scale_y={}). Non-uniform scale handling deferred to v0.3.1.",
+        transform.scale_x, transform.scale_y,
+    );
     let scale_x = transform.scale_x;
 
     // ── 3. Spawn entities for each BlockEntity ──────────────────────────
@@ -418,8 +424,8 @@ mod tests {
         let mut table = BlockTable::new();
         let mut history = History::new();
 
-        // Scale x = 3×, y = 2× (non-uniform)
-        let transform = Transform2D::new(Point2D::new(0.0, 0.0), 0.0, 3.0, 2.0);
+        // Uniform scale 3× — non-uniform scale handling deferred to v0.3.1
+        let transform = Transform2D::new(Point2D::new(0.0, 0.0), 0.0, 3.0, 3.0);
         let (entity, block_ref) = setup_insert(
             &mut world,
             &mut table,
@@ -431,11 +437,11 @@ mod tests {
         explode_block_insert(&mut world, &table, entity, &block_ref, &mut history).unwrap();
 
         for (_e, circle) in &mut world.query::<&CircleData>() {
-            // radius was 3.0, scale_x is 3.0 → 9.0
+            // radius was 3.0, scale 3× → 9.0
             assert!((circle.radius - 9.0).abs() < 1e-12, "expected radius 9.0, got {}", circle.radius);
-            // center was (5,5), scale (3×, 2×) → (15,10), translate (0,0) → (15,10)
+            // center was (5,5), scale (3×, 3×) → (15,15), translate (0,0) → (15,15)
             assert_eq!(circle.center.x, 15.0);
-            assert_eq!(circle.center.y, 10.0);
+            assert_eq!(circle.center.y, 15.0);
         }
     }
 
