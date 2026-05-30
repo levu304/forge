@@ -36,7 +36,9 @@ use std::time::Duration;
 use bytemuck;
 use hecs::World;
 
-use crate::ecs::components::{ArcData, CircleData, LineData, PolylineData, Renderable};
+use crate::ecs::components::{ArcData, CircleData, LayerRef, LineData, PolylineData, Renderable};
+use crate::layer::table::LayerTable;
+use crate::layer::LayerId;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -312,6 +314,7 @@ impl PickingPass {
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         zoom: f64,
+        layer_table: &LayerTable,
     ) {
         let pending = match self.pending_result {
             Some(p) => p,
@@ -325,10 +328,11 @@ impl PickingPass {
 
         // ── 2. Collect entities and generate vertex data ─────────────
 
-        Self::collect_lines(world, &mut self.mapping, &mut self.scratch, &mut self.draw_cmds);
+        Self::collect_lines(world, layer_table, &mut self.mapping, &mut self.scratch, &mut self.draw_cmds);
         Self::collect_circles(
             world,
             zoom,
+            layer_table,
             &mut self.mapping,
             &mut self.scratch,
             &mut self.draw_cmds,
@@ -336,12 +340,14 @@ impl PickingPass {
         Self::collect_arcs(
             world,
             zoom,
+            layer_table,
             &mut self.mapping,
             &mut self.scratch,
             &mut self.draw_cmds,
         );
         Self::collect_polylines(
             world,
+            layer_table,
             &mut self.mapping,
             &mut self.scratch,
             &mut self.draw_cmds,
@@ -570,14 +576,20 @@ impl PickingPass {
     // ── Private: entity vertex collection ───────────────────────────────
 
     /// Collect all `LineData + Renderable` entities.
+    ///
+    /// Skips entities whose layer is hidden or frozen.
     fn collect_lines(
         world: &World,
+        layer_table: &LayerTable,
         mapping: &mut Vec<hecs::Entity>,
         scratch: &mut Vec<PickingVertex>,
         cmds: &mut Vec<EntityDrawCmd>,
     ) {
         let mut query = world.query::<(&LineData, &Renderable)>();
         for (entity, (line, _)) in query.iter() {
+            if is_picking_layer_culled(world, entity, layer_table) {
+                continue;
+            }
             let entity_idx = mapping.len() as u32;
             mapping.push(entity);
 
@@ -599,15 +611,21 @@ impl PickingPass {
     }
 
     /// Collect all `CircleData + Renderable` entities.
+    ///
+    /// Skips entities whose layer is hidden or frozen.
     fn collect_circles(
         world: &World,
         zoom: f64,
+        layer_table: &LayerTable,
         mapping: &mut Vec<hecs::Entity>,
         scratch: &mut Vec<PickingVertex>,
         cmds: &mut Vec<EntityDrawCmd>,
     ) {
         let mut query = world.query::<(&CircleData, &Renderable)>();
         for (entity, (circle, _)) in query.iter() {
+            if is_picking_layer_culled(world, entity, layer_table) {
+                continue;
+            }
             let entity_idx = mapping.len() as u32;
             mapping.push(entity);
 
@@ -639,15 +657,21 @@ impl PickingPass {
     }
 
     /// Collect all `ArcData + Renderable` entities.
+    ///
+    /// Skips entities whose layer is hidden or frozen.
     fn collect_arcs(
         world: &World,
         zoom: f64,
+        layer_table: &LayerTable,
         mapping: &mut Vec<hecs::Entity>,
         scratch: &mut Vec<PickingVertex>,
         cmds: &mut Vec<EntityDrawCmd>,
     ) {
         let mut query = world.query::<(&ArcData, &Renderable)>();
         for (entity, (arc, _)) in query.iter() {
+            if is_picking_layer_culled(world, entity, layer_table) {
+                continue;
+            }
             let entity_idx = mapping.len() as u32;
             mapping.push(entity);
 
@@ -684,14 +708,20 @@ impl PickingPass {
     }
 
     /// Collect all `PolylineData + Renderable` entities.
+    ///
+    /// Skips entities whose layer is hidden or frozen.
     fn collect_polylines(
         world: &World,
+        layer_table: &LayerTable,
         mapping: &mut Vec<hecs::Entity>,
         scratch: &mut Vec<PickingVertex>,
         cmds: &mut Vec<EntityDrawCmd>,
     ) {
         let mut query = world.query::<(&PolylineData, &Renderable)>();
         for (entity, (poly, _)) in query.iter() {
+            if is_picking_layer_culled(world, entity, layer_table) {
+                continue;
+            }
             if poly.vertices.is_empty() {
                 continue;
             }
@@ -731,6 +761,25 @@ impl PickingPass {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Returns `true` when the entity's layer is hidden or frozen.
+///
+/// Entities without a `LayerRef` component are never culled (conservative
+/// default — they are visible and pickable).
+fn is_picking_layer_culled(
+    world: &World,
+    entity: hecs::Entity,
+    layer_table: &LayerTable,
+) -> bool {
+    if let Ok(lr) = world.get::<&LayerRef>(entity) {
+        layer_table
+            .get(LayerId(lr.0))
+            .map(|l| !l.visible || l.frozen)
+            .unwrap_or(false)
+    } else {
+        false
+    }
+}
 
 /// Compute the number of tessellation segments for a circle/arc at the
 /// given zoom level.
@@ -810,10 +859,11 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let mut mapping = Vec::new();
         let mut scratch = Vec::new();
         let mut cmds = Vec::new();
-        PickingPass::collect_lines(&world, &mut mapping, &mut scratch, &mut cmds);
+        PickingPass::collect_lines(&world, &layer_table, &mut mapping, &mut scratch, &mut cmds);
 
         assert_eq!(mapping.len(), 2);
         assert_eq!(scratch.len(), 4); // 2 lines × 2 vertices
@@ -840,10 +890,11 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let mut mapping = Vec::new();
         let mut scratch = Vec::new();
         let mut cmds = Vec::new();
-        PickingPass::collect_circles(&world, 1.0, &mut mapping, &mut scratch, &mut cmds);
+        PickingPass::collect_circles(&world, 1.0, &layer_table, &mut mapping, &mut scratch, &mut cmds);
 
         assert_eq!(mapping.len(), 1);
         assert_eq!(cmds.len(), 1);
@@ -881,10 +932,11 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let mut mapping = Vec::new();
         let mut scratch = Vec::new();
         let mut cmds = Vec::new();
-        PickingPass::collect_polylines(&world, &mut mapping, &mut scratch, &mut cmds);
+        PickingPass::collect_polylines(&world, &layer_table, &mut mapping, &mut scratch, &mut cmds);
 
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].vertex_count, 3);
@@ -908,10 +960,11 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let mut mapping = Vec::new();
         let mut scratch = Vec::new();
         let mut cmds = Vec::new();
-        PickingPass::collect_polylines(&world, &mut mapping, &mut scratch, &mut cmds);
+        PickingPass::collect_polylines(&world, &layer_table, &mut mapping, &mut scratch, &mut cmds);
 
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].vertex_count, 4); // 3 + 1 closing
@@ -935,10 +988,11 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let mut mapping = Vec::new();
         let mut scratch = Vec::new();
         let mut cmds = Vec::new();
-        PickingPass::collect_polylines(&world, &mut mapping, &mut scratch, &mut cmds);
+        PickingPass::collect_polylines(&world, &layer_table, &mut mapping, &mut scratch, &mut cmds);
 
         assert!(cmds.is_empty());
         assert!(scratch.is_empty());
@@ -969,11 +1023,12 @@ mod tests {
             Renderable,
         ));
 
+        let layer_table = LayerTable::new();
         let mut mapping = Vec::new();
         let mut scratch = Vec::new();
         let mut cmds = Vec::new();
-        PickingPass::collect_lines(&world, &mut mapping, &mut scratch, &mut cmds);
-        PickingPass::collect_circles(&world, 1.0, &mut mapping, &mut scratch, &mut cmds);
+        PickingPass::collect_lines(&world, &layer_table, &mut mapping, &mut scratch, &mut cmds);
+        PickingPass::collect_circles(&world, 1.0, &layer_table, &mut mapping, &mut scratch, &mut cmds);
 
         assert_eq!(mapping.len(), 2);
         assert!(mapping.contains(&e1));

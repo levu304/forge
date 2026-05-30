@@ -307,6 +307,7 @@ impl ForgeApp {
                     &self.render_state.queue,
                     &self.render_state.device,
                     self.resources.camera.zoom,
+                    &self.layer_table,
                 );
             }
             self.needs_picking = false;
