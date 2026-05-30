@@ -7,6 +7,12 @@
       "skillPath": "skills/cross-platform-compatibility/SKILL.md",
       "computedHash": "a4cce642d2919910b5b6aa0eaab5798d64dafc1ad8923d87b2ec689efc8d4ace"
     },
+    "memory-safety-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/systems-programming/skills/memory-safety-patterns/SKILL.md",
+      "computedHash": "a2705450170c7024e669ef5a6881a13010e76c00410e9e20339fd394a980b0bb"
+    },
     "rust-async-patterns": {
       "source": "wshobson/agents",
       "sourceType": "github",
