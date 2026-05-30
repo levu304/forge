@@ -4,6 +4,7 @@
 //! and concrete command implementations (LINE, CIRCLE, ARC, PLINE).
 
 use crate::geometry::Point2D;
+use crate::history::Transaction;
 use crate::util::Color;
 use hecs::World;
 
@@ -62,9 +63,11 @@ pub enum CommandInput {
     Confirm,                  // Enter key
 }
 
+#[derive(Debug)]
 pub enum CommandResult {
     Continue,                 // Await next input
-    Complete,                 // Command finished successfully
+    Complete,                 // Command finished successfully (transaction via take_transaction)
+    CompleteWithTransaction(Transaction), // Command finished with embedded transaction
     Error(String),            // Invalid input, show error, continue
     Cancelled,                // User cancelled
 }
@@ -84,6 +87,10 @@ pub enum PendingModifyCommand {
     Scale,
     Mirror,
     Offset,
+    /// Decompose block references into primitives.
+    Explode,
+    /// Copy visual properties from a source entity to targets.
+    MatchProp,
 }
 
 /// Manages the active command and command history.

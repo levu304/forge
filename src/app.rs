@@ -22,10 +22,13 @@ use std::sync::Arc;
 use winit::window::Window;
 
 use crate::commands::{
-    self, copy_cmd::CopyCommand, erase_cmd::EraseCommand, line_cmd::LineCommand,
-    mirror_cmd::MirrorCommand, move_cmd::MoveCommand, offset_cmd::OffsetCommand,
-    rotate_cmd::RotateCommand, scale_cmd::ScaleCommand,
-    Command, CommandInput, CommandResult, CommandState, PendingModifyCommand,
+    self, copy_cmd::CopyCommand, ellipse_cmd::EllipseCommand, erase_cmd::EraseCommand,
+    explode_cmd::ExplodeCommand, line_cmd::LineCommand,
+    match_prop_cmd::MatchPropCommand, mirror_cmd::MirrorCommand, move_cmd::MoveCommand,
+    offset_cmd::OffsetCommand, polygon_cmd::PolygonCommand,
+    rectangle_cmd::RectangleCommand, rotate_cmd::RotateCommand,
+    scale_cmd::ScaleCommand, spline_cmd::SplineCommand, Command, CommandInput,
+    CommandResult, CommandState, PendingModifyCommand,
 };
 use crate::ecs::resources::{CameraState, GridConfig, SnapConfig};
 use crate::block::definition::BlockTable;
@@ -439,16 +442,24 @@ impl ForgeApp {
     /// via [`Command::take_transaction`].  The caller must have already
     /// extracted the transaction before calling this method.
     ///
-    /// | Result      | Clears active? | Pushes to history? |
-    /// |-------------|----------------|--------------------|
-    /// | `Complete`  | Yes            | Yes (if tx exists) |
-    /// | `Cancelled` | Yes            | No                 |
-    /// | `Error`     | No             | No                 |
-    /// | `Continue`  | No             | No                 |
+    /// | Result                    | Clears active? | Pushes to history? |
+    /// |---------------------------|----------------|--------------------|
+    /// | `Complete`                | Yes            | Yes (if tx exists) |
+    /// | `CompleteWithTransaction` | Yes            | Yes (tx embedded)  |
+    /// | `Cancelled`               | Yes            | No                 |
+    /// | `Error`                   | No             | No                 |
+    /// | `Continue`                | No             | No                 |
     pub fn handle_command_result(&mut self, result: CommandResult, transaction: Option<Transaction>) {
         match result {
             CommandResult::Complete => {
                 if let Some(tx) = transaction {
+                    self.history.push(tx);
+                }
+                self.command_state.active = None;
+                self.command_state.last_error = None;
+            }
+            CommandResult::CompleteWithTransaction(tx) => {
+                if !tx.is_empty() {
                     self.history.push(tx);
                 }
                 self.command_state.active = None;
@@ -562,6 +573,73 @@ impl ForgeApp {
                         );
                         return;
                     }
+                    commands::parser::ParsedCommand::Rectangle(args) => {
+                        let mut rect_cmd = Box::new(RectangleCommand::new());
+                        if let Some(first) = args.first_corner {
+                            let _ = rect_cmd.on_input(
+                                CommandInput::Point(first),
+                                &mut self.world,
+                            );
+                        }
+                        if let Some(second) = args.second_corner {
+                            let _ = rect_cmd.on_input(
+                                CommandInput::Point(second),
+                                &mut self.world,
+                            );
+                        }
+                        rect_cmd
+                    }
+                    commands::parser::ParsedCommand::Polygon(args) => {
+                        let mut poly_cmd = Box::new(PolygonCommand::new());
+                        if let Some(center) = args.center {
+                            let _ = poly_cmd.on_input(
+                                CommandInput::Point(center),
+                                &mut self.world,
+                            );
+                        }
+                        if let Some(radius) = args.radius {
+                            let _ = poly_cmd.on_input(
+                                CommandInput::Distance(radius),
+                                &mut self.world,
+                            );
+                        }
+                        if let Some(sides) = args.sides {
+                            poly_cmd.set_sides(sides);
+                        }
+                        poly_cmd
+                    }
+                    commands::parser::ParsedCommand::Ellipse(args) => {
+                        let mut ell_cmd = Box::new(EllipseCommand::new());
+                        if let Some(center) = args.center {
+                            let _ = ell_cmd.on_input(
+                                CommandInput::Point(center),
+                                &mut self.world,
+                            );
+                        }
+                        if let Some(major) = args.major_end {
+                            let _ = ell_cmd.on_input(
+                                CommandInput::Point(major),
+                                &mut self.world,
+                            );
+                        }
+                        if let Some(ratio) = args.minor_ratio {
+                            let _ = ell_cmd.on_input(
+                                CommandInput::Distance(ratio),
+                                &mut self.world,
+                            );
+                        }
+                        ell_cmd
+                    }
+                    commands::parser::ParsedCommand::Spline(args) => {
+                        let mut spl_cmd = Box::new(SplineCommand::new());
+                        for pt in args.fit_points {
+                            let _ = spl_cmd.on_input(
+                                CommandInput::Point(pt),
+                                &mut self.world,
+                            );
+                        }
+                        spl_cmd
+                    }
                 };
 
                 // If the command already has enough input (e.g. inline args
@@ -572,6 +650,12 @@ impl ForgeApp {
                     match result {
                         CommandResult::Complete => {
                             if let Some(tx) = cmd.take_transaction() {
+                                self.history.push(tx);
+                            }
+                            self.command_state.last_error = None;
+                        }
+                        CommandResult::CompleteWithTransaction(tx) => {
+                            if !tx.is_empty() {
                                 self.history.push(tx);
                             }
                             self.command_state.last_error = None;
@@ -672,6 +756,24 @@ impl ForgeApp {
                     return;
                 }
                 Box::new(OffsetCommand::new(&self.selection_manager))
+            }
+            PendingModifyCommand::Explode => {
+                if let Err(msg) = require_selection(&self.selection_manager, "EXPLODE") {
+                    self.command_state.last_error = Some(msg);
+                    return;
+                }
+                Box::new(ExplodeCommand::new(
+                    &self.selection_manager,
+                    &self.world,
+                    &self.block_table,
+                ))
+            }
+            PendingModifyCommand::MatchProp => {
+                if let Err(msg) = require_selection(&self.selection_manager, "MATCHPROP") {
+                    self.command_state.last_error = Some(msg);
+                    return;
+                }
+                Box::new(MatchPropCommand::new(&self.selection_manager))
             }
         };
 
