@@ -197,7 +197,7 @@ mod tests {
         assert_eq!(history.undo_label(), Some("Match Properties"));
 
         // Undo should restore target's original properties
-        history.undo(&mut world);
+        history.undo(&mut world, &mut Default::default());
         assert_eq!(
             *world.get::<&PropertySource>(target).unwrap(),
             PropertySource::ByLayer

@@ -10,6 +10,8 @@
 //!   [`BlockTable`] with delegated CRUD methods.
 
 pub mod definition;
+pub mod editor;
+pub mod explode;
 pub mod insert;
 
 // ---------------------------------------------------------------------------
@@ -17,6 +19,8 @@ pub mod insert;
 // ---------------------------------------------------------------------------
 
 pub use definition::{BlockDef, BlockEntity, BlockError, BlockId, BlockTable};
+pub use editor::BlockEditorState;
+pub use explode::explode_block_insert;
 pub use insert::{BlockInsert, BlockRef};
 
 /// Thin owning wrapper around [`BlockTable`].

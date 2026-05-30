@@ -59,7 +59,7 @@ fn selection_flow_select_erase_undo() {
     assert_eq!(count_entities(&world), 1);
 
     // Undo — e1 should be restored.
-    let label = history.undo(&mut world);
+    let label = history.undo(&mut world, &mut Default::default());
     assert!(label.is_some());
     let mapping = history.take_entity_mapping();
     let remapped_e1 = mapping.map(e1);
