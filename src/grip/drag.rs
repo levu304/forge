@@ -152,12 +152,17 @@ impl GripDragState {
             let result = world.get::<&PolylineData>(entity);
             match result {
                 Ok(component) => {
-                    let mut data = PolylineData::clone(&*component);
-                    if handle.vertex_index < data.vertices.len() {
+                    let data = PolylineData::clone(&*component);
+                    // Out-of-bounds vertex_index (e.g. after undo shrinks
+                    // the polyline without regenerate()) → skip silently.
+                    if handle.vertex_index >= data.vertices.len() {
+                        None
+                    } else {
+                        let mut data = data;
                         data.vertices[handle.vertex_index] =
                             data.vertices[handle.vertex_index] + delta;
+                        Some(data)
                     }
-                    Some(data)
                 }
                 Err(_) => None,
             }
@@ -233,7 +238,10 @@ impl GripDragState {
     /// Returns `None` if no snapshot was captured or the entity no longer
     /// has the expected component.
     pub fn finalize_transaction(&mut self, world: &World) -> Option<AtomicOp> {
-        let snapshot = self.snapshot.take()?;
+        // Borrow the snapshot first — don't move it out yet so we don't
+        // lose the undo data if the world read fails (e.g. entity was
+        // despawned mid-drag).  Cleared below only on success.
+        let snapshot = self.snapshot.as_ref()?;
         let entity = self.entity;
 
         let finalized = match snapshot {
@@ -245,8 +253,8 @@ impl GripDragState {
                 let result = world.get::<&LineData>(entity).ok()?;
                 let new = *result;
                 AtomicOp::SetLineData {
-                    entity: e,
-                    old,
+                    entity: *e,
+                    old: *old,
                     new,
                 }
             }
@@ -258,8 +266,8 @@ impl GripDragState {
                 let result = world.get::<&CircleData>(entity).ok()?;
                 let new = *result;
                 AtomicOp::SetCircleData {
-                    entity: e,
-                    old,
+                    entity: *e,
+                    old: *old,
                     new,
                 }
             }
@@ -271,8 +279,8 @@ impl GripDragState {
                 let result = world.get::<&ArcData>(entity).ok()?;
                 let new = *result;
                 AtomicOp::SetArcData {
-                    entity: e,
-                    old,
+                    entity: *e,
+                    old: *old,
                     new,
                 }
             }
@@ -284,14 +292,22 @@ impl GripDragState {
                 let result = world.get::<&PolylineData>(entity).ok()?;
                 let new = PolylineData::clone(&*result);
                 AtomicOp::SetPolylineData {
-                    entity: e,
-                    old,
+                    entity: *e,
+                    old: old.clone(),
                     new,
                 }
             }
-            _ => return None,
+            _ => {
+                // AtomicOp is #[non_exhaustive]; new variants can appear
+                // without triggering a compile error.  Surface misuse in
+                // debug builds so we catch stale snapshots early.
+                debug_assert!(false, "finalize_transaction: unexpected snapshot variant {snapshot:?}");
+                return None;
+            }
         };
 
+        // Only clear the snapshot after a successful world read.
+        self.snapshot = None;
         Some(finalized)
     }
 
@@ -483,7 +499,7 @@ mod tests {
         assert_eq!(circle.radius, 3.0, "radius unchanged");
     }
 
-    // ── apply: arc center ───────────────────────────────────────────
+    // ── apply: arc center / endpoint / midpoint ─────────────────────
 
     #[test]
     fn test_apply_arc_center() {
@@ -502,6 +518,45 @@ mod tests {
             Point2D::new(2.0, -3.0),
             "center shifted by delta"
         );
+    }
+
+    #[test]
+    fn test_apply_arc_endpoint_noop() {
+        // v0.3.0: dragging arc endpoints is deferred — must be no-op.
+        let mut world = World::new();
+        let entity = make_arc(&mut world);
+        // Arc: center=(0,0), radius=5, start=0° → end point at (5,  0)
+        let pos = Point2D::new(5.0, 0.0);
+        let handle = GripHandle::new(GripType::Endpoint, pos, entity, 0);
+
+        let mut drag = GripDragState::new(0, entity, Point2D::new(0.0, 0.0));
+        drag.update_position(Point2D::new(10.0, 10.0));
+        drag.apply(&mut world, &handle);
+
+        let arc = world.get::<&ArcData>(entity).unwrap();
+        assert_eq!(arc.center, Point2D::new(0.0, 0.0), "center unchanged");
+        assert_eq!(arc.radius, 5.0, "radius unchanged");
+        assert_eq!(arc.start_angle, 0.0, "start_angle unchanged");
+        assert_eq!(arc.end_angle, 90.0, "end_angle unchanged");
+    }
+
+    #[test]
+    fn test_apply_arc_midpoint_noop() {
+        // v0.3.0: dragging arc midpoints is deferred — must be no-op.
+        let mut world = World::new();
+        let entity = make_arc(&mut world);
+        let pos = Point2D::new(5.0 * std::f64::consts::FRAC_1_SQRT_2, 5.0 * std::f64::consts::FRAC_1_SQRT_2);
+        let handle = GripHandle::new(GripType::Midpoint, pos, entity, 0);
+
+        let mut drag = GripDragState::new(0, entity, Point2D::new(0.0, 0.0));
+        drag.update_position(Point2D::new(10.0, 10.0));
+        drag.apply(&mut world, &handle);
+
+        let arc = world.get::<&ArcData>(entity).unwrap();
+        assert_eq!(arc.center, Point2D::new(0.0, 0.0), "center unchanged");
+        assert_eq!(arc.radius, 5.0, "radius unchanged");
+        assert_eq!(arc.start_angle, 0.0, "start_angle unchanged");
+        assert_eq!(arc.end_angle, 90.0, "end_angle unchanged");
     }
 
     // ── apply: polyline vertex ──────────────────────────────────────
@@ -524,6 +579,26 @@ mod tests {
             Point2D::new(0.0, 10.0),
             "v1 shifted by delta (-5,5)"
         );
+        assert_eq!(poly.vertices[2], Point2D::new(10.0, 0.0), "v2 unchanged");
+    }
+
+    #[test]
+    fn test_apply_polyline_vertex_oob_noop() {
+        // vertex_index=99 on a 3-vertex polyline → skip without panic
+        // and without modifying any vertex.
+        let mut world = World::new();
+        let entity = make_polyline(&mut world);
+        let pos = Point2D::new(0.0, 0.0);
+        let handle = GripHandle::new(GripType::Vertex, pos, entity, 99);
+
+        let mut drag = GripDragState::new(0, entity, Point2D::new(0.0, 0.0));
+        drag.update_position(Point2D::new(100.0, 100.0));
+        drag.apply(&mut world, &handle);
+
+        let poly = world.get::<&PolylineData>(entity).unwrap();
+        assert_eq!(poly.vertices.len(), 3, "vertices unchanged");
+        assert_eq!(poly.vertices[0], Point2D::new(0.0, 0.0), "v0 unchanged");
+        assert_eq!(poly.vertices[1], Point2D::new(5.0, 5.0), "v1 unchanged");
         assert_eq!(poly.vertices[2], Point2D::new(10.0, 0.0), "v2 unchanged");
     }
 
@@ -608,6 +683,34 @@ mod tests {
         let mut drag = GripDragState::new(0, entity, Point2D::new(0.0, 0.0));
 
         assert!(drag.finalize_transaction(&world).is_none());
+    }
+
+    #[test]
+    fn test_finalize_transaction_after_despawn_returns_none() {
+        // If the entity is despawned between capture_snapshot() and
+        // finalize_transaction(), the snapshot must NOT be consumed/lost
+        // — return None but keep the snapshot for potential recovery.
+        let mut world = World::new();
+        let entity = make_line(&mut world);
+        let mut drag = GripDragState::new(0, entity, Point2D::new(0.0, 0.0));
+
+        drag.capture_snapshot(&world);
+        assert!(drag.snapshot.is_some(), "snapshot captured");
+
+        // Despawn the entity
+        world.despawn(entity).unwrap();
+
+        // finalize_transaction returns None because entity is gone
+        assert!(
+            drag.finalize_transaction(&world).is_none(),
+            "should return None when entity is despawned"
+        );
+
+        // Snapshot should NOT be consumed — undo data preserved
+        assert!(
+            drag.snapshot.is_some(),
+            "snapshot must survive failed finalize"
+        );
     }
 
     #[test]

@@ -151,7 +151,14 @@ impl GripSystem {
                     1,
                 ));
                 // Midpoint (at mid-angle)
-                let mid_angle = (arc.start_angle + arc.end_angle) / 2.0;
+                // Handle wrap-around arcs: end < start means the arc
+                // crosses the 0° boundary, so add 360° before averaging.
+                let end_normalized = if arc.end_angle >= arc.start_angle {
+                    arc.end_angle
+                } else {
+                    arc.end_angle + 360.0
+                };
+                let mid_angle = ((arc.start_angle + end_normalized) / 2.0) % 360.0;
                 let mid_pos = arc_point(arc.center, arc.radius, mid_angle);
                 self.handles.push(GripHandle::new(
                     GripType::Midpoint,
@@ -505,6 +512,41 @@ mod tests {
         assert!(
             (grip.handles[3].position.y - expected).abs() < 1e-10,
             "mid y"
+        );
+    }
+
+    #[test]
+    fn test_regenerate_arc_wrap_around_midpoint() {
+        // Arc crossing the 0° boundary: start=350°, end=10°
+        // Midpoint should be near 0°/360°, NOT (350+10)/2 = 180°.
+        let mut world = World::new();
+        let _entity = world.spawn((
+            ArcData {
+                center: Point2D::new(0.0, 0.0),
+                radius: 5.0,
+                start_angle: 350.0,
+                end_angle: 10.0,
+                color: Color::WHITE,
+                width: 1.0,
+            },
+            Selected,
+        ));
+
+        let mut grip = GripSystem::new();
+        grip.regenerate(&world);
+
+        // Midpoint is the 4th handle (index 3)
+        let mid = grip.handles[3].position;
+        // At radius=5, angle ~0° → position ≈ (5, 0)
+        assert!(
+            (mid.x - 5.0).abs() < 1e-10,
+            "midpoint x expected ~5.0, got {}",
+            mid.x
+        );
+        assert!(
+            (mid.y - 0.0).abs() < 1e-10,
+            "midpoint y expected ~0.0, got {}",
+            mid.y
         );
     }
 
