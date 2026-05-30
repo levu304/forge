@@ -52,6 +52,8 @@ pub fn draw(ui: &mut egui::Ui, cmd_state: &mut CommandState) {
                     ("SCALE", PendingModifyCommand::Scale),
                     ("MIRROR", PendingModifyCommand::Mirror),
                     ("OFFSET", PendingModifyCommand::Offset),
+                    ("EXPLODE", PendingModifyCommand::Explode),
+                    ("MATCHPROP", PendingModifyCommand::MatchProp),
                 ];
                 for &(label, cmd) in MODIFY_COMMANDS {
                     if ui.button(label).clicked() {
@@ -140,7 +142,10 @@ mod tests {
     fn modify_buttons_exist() {
         let mut harness = new_harness();
         harness.run();
-        for &label in &["ERASE", "MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "OFFSET"] {
+        for &label in &[
+            "ERASE", "MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "OFFSET",
+            "EXPLODE", "MATCHPROP",
+        ] {
             let node = harness.get_by_label(label);
             let r = node.rect();
             assert!(r.size().x > 0.0 && r.size().y > 0.0, "Button '{label}' should be visible (rect: {r:?})");
@@ -226,6 +231,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn click_explode_dispatches_modify_command() {
+        let mut harness = new_harness();
+        harness.get_by_label("EXPLODE").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::Explode),
+        );
+    }
+
+    #[test]
+    fn click_matchprop_dispatches_modify_command() {
+        let mut harness = new_harness();
+        harness.get_by_label("MATCHPROP").click();
+        harness.run();
+        assert_eq!(
+            harness.state().pending_modify_command,
+            Some(PendingModifyCommand::MatchProp),
+        );
+    }
+
     // -- Interaction: draw + modify together ----------------------------------
 
     #[test]
@@ -261,6 +288,8 @@ mod tests {
         let scale = harness.get_by_label("SCALE").rect();
         let mirror = harness.get_by_label("MIRROR").rect();
         let offset = harness.get_by_label("OFFSET").rect();
+        let explode = harness.get_by_label("EXPLODE").rect();
+        let matchprop = harness.get_by_label("MATCHPROP").rect();
 
         assert!(erase.max.y <= mv.min.y, "ERASE overlaps MOVE");
         assert!(mv.max.y <= copy.min.y, "MOVE overlaps COPY");
@@ -268,5 +297,7 @@ mod tests {
         assert!(rotate.max.y <= scale.min.y, "ROTATE overlaps SCALE");
         assert!(scale.max.y <= mirror.min.y, "SCALE overlaps MIRROR");
         assert!(mirror.max.y <= offset.min.y, "MIRROR overlaps OFFSET");
+        assert!(offset.max.y <= explode.min.y, "OFFSET overlaps EXPLODE");
+        assert!(explode.max.y <= matchprop.min.y, "EXPLODE overlaps MATCHPROP");
     }
 }

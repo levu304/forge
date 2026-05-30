@@ -21,6 +21,10 @@ pub enum ParsedCommand {
     Circle(CircleArgs),
     Arc(ArcArgs),
     Polyline(PolylineArgs),
+    Rectangle(RectangleArgs),
+    Polygon(PolygonArgs),
+    Ellipse(EllipseArgs),
+    Spline(SplineArgs),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,6 +51,31 @@ pub struct ArcArgs {
 pub struct PolylineArgs {
     pub vertices: Vec<Point2D>,
     pub closed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RectangleArgs {
+    pub first_corner: Option<Point2D>,
+    pub second_corner: Option<Point2D>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolygonArgs {
+    pub center: Option<Point2D>,
+    pub radius: Option<f64>,
+    pub sides: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EllipseArgs {
+    pub center: Option<Point2D>,
+    pub major_end: Option<Point2D>,
+    pub minor_ratio: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SplineArgs {
+    pub fit_points: Vec<Point2D>,
 }
 
 /// Parse a 2D point from strings like:
@@ -77,6 +106,14 @@ pub fn parse_command(input: &str) -> IResult<&str, ParsedCommand> {
         tag_no_case("A"),
         tag_no_case("PLINE"),
         tag_no_case("PL"),
+        tag_no_case("RECTANGLE"),
+        tag_no_case("RECT"),
+        tag_no_case("POLYGON"),
+        tag_no_case("POLY"),
+        tag_no_case("ELLIPSE"),
+        tag_no_case("ELL"),
+        tag_no_case("SPLINE"),
+        tag_no_case("SPL"),
     ))
     .parse(input)?;
 
@@ -200,6 +237,92 @@ pub fn parse_command(input: &str) -> IResult<&str, ParsedCommand> {
             Ok((rest, ParsedCommand::Polyline(PolylineArgs {
                 vertices,
                 closed: false,
+            })))
+        }
+        "RECTANGLE" | "RECT" => {
+            // RECTANGLE [first_corner] [second_corner]
+            let (rest, first) = opt(parse_point).parse(rest)?;
+            let (rest, second) = if first.is_some() {
+                let (rest, _) = space0.parse(rest)?;
+                opt(parse_point).parse(rest)?
+            } else {
+                (rest, None)
+            };
+            Ok((rest, ParsedCommand::Rectangle(RectangleArgs {
+                first_corner: first,
+                second_corner: second,
+            })))
+        }
+        "POLYGON" | "POLY" => {
+            // POLYGON [center] [radius] [sides]
+            let (rest, center) = opt(parse_point).parse(rest)?;
+            let (rest, radius) = if center.is_some() {
+                let (rest, _) = space0.parse(rest)?;
+                let (rest, r) = opt(float).parse(rest)?;
+                (rest, r.map(|v| v as f64))
+            } else {
+                (rest, None)
+            };
+            let (rest, sides) = if radius.is_some() {
+                let (rest, _) = space0.parse(rest)?;
+                let (rest, s) = opt(float).parse(rest)?;
+                (rest, s.map(|v| v as u32))
+            } else {
+                (rest, None)
+            };
+            Ok((rest, ParsedCommand::Polygon(PolygonArgs {
+                center,
+                radius,
+                sides,
+            })))
+        }
+        "ELLIPSE" | "ELL" => {
+            // ELLIPSE [center] [major_end] [minor_ratio]
+            let (rest, center) = opt(parse_point).parse(rest)?;
+            let (rest, major_end) = if center.is_some() {
+                let (rest, _) = space0.parse(rest)?;
+                opt(parse_point).parse(rest)?
+            } else {
+                (rest, None)
+            };
+            let (rest, minor_ratio) = if major_end.is_some() {
+                let (rest, _) = space0.parse(rest)?;
+                let (rest, r) = opt(float).parse(rest)?;
+                (rest, r.map(|v| v as f64))
+            } else {
+                (rest, None)
+            };
+            Ok((rest, ParsedCommand::Ellipse(EllipseArgs {
+                center,
+                major_end,
+                minor_ratio,
+            })))
+        }
+        "SPLINE" | "SPL" => {
+            // SPLINE point1 point2 ...
+            let mut fit_points = Vec::new();
+            let mut rest = rest;
+
+            loop {
+                let (r, _) = space0::<&str, nom::error::Error<&str>>(rest).unwrap_or((rest, ""));
+                match parse_point(r) {
+                    Ok((r, pt)) => {
+                        fit_points.push(pt);
+                        rest = r;
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            if fit_points.is_empty() {
+                return Err(nom::Err::Error(nom::error::Error::new(
+                    rest,
+                    nom::error::ErrorKind::Fail,
+                )));
+            }
+
+            Ok((rest, ParsedCommand::Spline(SplineArgs {
+                fit_points,
             })))
         }
         _ => unreachable!(), // Guaranteed by alt() above
@@ -690,6 +813,186 @@ mod tests {
             ParsedCommand::Circle(CircleArgs {
                 center: Some(Point2D::new(0.0, 0.0)),
                 radius: Some(-5.0),
+            })
+        );
+    }
+
+    // ── RECTANGLE ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_rectangle_full() {
+        let result = parse_command("RECTANGLE 0,0 100,100");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Rectangle(RectangleArgs {
+                first_corner: Some(Point2D::new(0.0, 0.0)),
+                second_corner: Some(Point2D::new(100.0, 100.0)),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_rectangle_bare() {
+        let result = parse_command("RECTANGLE");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Rectangle(RectangleArgs {
+                first_corner: None,
+                second_corner: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_rectangle_alias() {
+        let result = parse_command("RECT 10,20 30,40");
+        assert!(result.is_ok());
+        let (_remaining, cmd) = result.unwrap();
+        assert_eq!(
+            cmd,
+            ParsedCommand::Rectangle(RectangleArgs {
+                first_corner: Some(Point2D::new(10.0, 20.0)),
+                second_corner: Some(Point2D::new(30.0, 40.0)),
+            })
+        );
+    }
+
+    // ── POLYGON ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_polygon_full() {
+        let result = parse_command("POLYGON 50,50 25 8");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Polygon(PolygonArgs {
+                center: Some(Point2D::new(50.0, 50.0)),
+                radius: Some(25.0),
+                sides: Some(8),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_polygon_bare() {
+        let result = parse_command("POLYGON");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert_eq!(
+            cmd,
+            ParsedCommand::Polygon(PolygonArgs {
+                center: None,
+                radius: None,
+                sides: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_polygon_alias() {
+        let result = parse_command("POLY 0,0 10 6");
+        assert!(result.is_ok());
+        let (_remaining, cmd) = result.unwrap();
+        assert_eq!(
+            cmd,
+            ParsedCommand::Polygon(PolygonArgs {
+                center: Some(Point2D::new(0.0, 0.0)),
+                radius: Some(10.0),
+                sides: Some(6),
+            })
+        );
+    }
+
+    // ── ELLIPSE ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_ellipse_full() {
+        let result = parse_command("ELLIPSE 0,0 50,0 0.5");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Ellipse(EllipseArgs {
+                center: Some(Point2D::new(0.0, 0.0)),
+                major_end: Some(Point2D::new(50.0, 0.0)),
+                minor_ratio: Some(0.5),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_ellipse_bare() {
+        let result = parse_command("ELLIPSE");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert_eq!(
+            cmd,
+            ParsedCommand::Ellipse(EllipseArgs {
+                center: None,
+                major_end: None,
+                minor_ratio: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_ellipse_alias() {
+        let result = parse_command("ELL 10,10 30,10 0.75");
+        assert!(result.is_ok());
+        let (_remaining, cmd) = result.unwrap();
+        assert_eq!(
+            cmd,
+            ParsedCommand::Ellipse(EllipseArgs {
+                center: Some(Point2D::new(10.0, 10.0)),
+                major_end: Some(Point2D::new(30.0, 10.0)),
+                minor_ratio: Some(0.75),
+            })
+        );
+    }
+
+    // ── SPLINE ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_spline_points() {
+        let result = parse_command("SPLINE 0,0 10,10 20,0 30,10");
+        assert!(result.is_ok());
+        let (remaining, cmd) = result.unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(
+            cmd,
+            ParsedCommand::Spline(SplineArgs {
+                fit_points: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(10.0, 10.0),
+                    Point2D::new(20.0, 0.0),
+                    Point2D::new(30.0, 10.0),
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_spline_alias() {
+        let result = parse_command("SPL 0,0 5,5 10,0");
+        assert!(result.is_ok());
+        let (_remaining, cmd) = result.unwrap();
+        assert_eq!(
+            cmd,
+            ParsedCommand::Spline(SplineArgs {
+                fit_points: vec![
+                    Point2D::new(0.0, 0.0),
+                    Point2D::new(5.0, 5.0),
+                    Point2D::new(10.0, 0.0),
+                ],
             })
         );
     }
