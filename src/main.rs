@@ -155,8 +155,7 @@ impl ApplicationHandler for ForgeAppHandler {
                 if !wants_keyboard && ctrl {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::KeyZ) => {
-                            let mut block_table = Default::default();
-                            let label = state.app.history.undo(&mut state.app.world, &mut block_table);
+                            let label = state.app.history.undo(&mut state.app.world, &mut state.app.block_table);
                             if let Some(_label) = label {
                                 let mapping = state.app.history.take_entity_mapping();
                                 apply_entity_remapping(
@@ -169,8 +168,7 @@ impl ApplicationHandler for ForgeAppHandler {
                             return;
                         }
                         PhysicalKey::Code(KeyCode::KeyY) => {
-                            let mut block_table = Default::default();
-                            let label = state.app.history.redo(&mut state.app.world, &mut block_table);
+                            let label = state.app.history.redo(&mut state.app.world, &mut state.app.block_table);
                             if let Some(_label) = label {
                                 let mapping = state.app.history.take_entity_mapping();
                                 apply_entity_remapping(
