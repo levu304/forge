@@ -597,14 +597,22 @@ impl ForgeApp {
                                 &mut self.world,
                             );
                         }
-                        if let Some(radius) = args.radius {
-                            let _ = poly_cmd.on_input(
-                                CommandInput::Distance(radius),
-                                &mut self.world,
-                            );
-                        }
                         if let Some(sides) = args.sides {
                             poly_cmd.set_sides(sides);
+                        }
+                        if let Some(radius) = args.radius {
+                            if let CommandResult::CompleteWithTransaction(tx) =
+                                poly_cmd.on_input(
+                                    CommandInput::Distance(radius),
+                                    &mut self.world,
+                                )
+                            {
+                                if !tx.is_empty() {
+                                    self.history.push(tx);
+                                }
+                                self.command_state.last_error = None;
+                                return;
+                            }
                         }
                         poly_cmd
                     }
