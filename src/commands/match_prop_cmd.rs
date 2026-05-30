@@ -91,15 +91,27 @@ fn hit_test(world: &World, point: crate::geometry::Point2D) -> Option<Entity> {
 }
 
 /// Minimum distance from `p` to the line segment `a`–`b`.
+///
+/// When `a == b` (zero-length segment, e.g. duplicate polyline vertex),
+/// returns the distance from `p` to `a` directly instead of computing
+/// a NaN projection.
 fn point_to_line_segment_distance(
     p: crate::geometry::Point2D,
     a: crate::geometry::Point2D,
     b: crate::geometry::Point2D,
 ) -> f64 {
     let ab = b - a;
+    let dot_ab_ab = ab.x * ab.x + ab.y * ab.y;
+
+    // Zero-length segment — return distance from p to a.
+    if dot_ab_ab == 0.0 {
+        let dx = p.x - a.x;
+        let dy = p.y - a.y;
+        return (dx * dx + dy * dy).sqrt();
+    }
+
     let ap = p - a;
     let dot_ap_ab = ap.x * ab.x + ap.y * ab.y;
-    let dot_ab_ab = ab.x * ab.x + ab.y * ab.y;
     let t = (dot_ap_ab / dot_ab_ab).clamp(0.0, 1.0);
     let closest = a + ab * t;
     let dx = p.x - closest.x;
