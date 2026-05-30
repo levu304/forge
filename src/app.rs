@@ -321,6 +321,7 @@ impl ForgeApp {
             &self.render_state.camera_bind_group,
             &self.render_state.queue,
             &self.render_state.device,
+            &self.layer_table,
         );
 
         // ── 4d. Snap marker (on top of entities, below UI) ─────────────────
